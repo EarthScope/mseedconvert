@@ -21,6 +21,8 @@ static void term_handler (int sig);
 #endif
 
 #include <libmseed.h>
+#include <parson.h>
+
 
 #define VERSION "0.1"
 #define PACKAGE "mseedconvert"
@@ -34,12 +36,18 @@ static char *inputfile = NULL;
 static char *outputfile = NULL;
 static FILE *outfile = NULL;
 
+static char *json_input = NULL;
+
+
 static int convertsamples (MS3Record *msr, int packencoding);
 static int parameter_proc (int argcount, char **argvec);
 static void record_handler (char *record, int reclen, void *ptr);
 static void print_stderr (char *message);
 static void usage (void);
 static void term_handler (int sig);
+
+int jsonInjectionSetup(MS3Record *msr,int verbose);
+
 
 int
 main (int argc, char **argv)
@@ -120,6 +128,12 @@ main (int argc, char **argv)
 
       // TODO repack could determine the number of samples for INT, FLOAT32 and FLOAT64 and trim payload length
 
+     //Inject json
+     if(json_input != NULL)
+     {
+        jsonInjectionSetup(msr,verbose);
+     }
+
       reclen = msr3_repack_mseed3 (msr, rawrec, MAXRECLEN, verbose);
 
       if (reclen < 0)
@@ -150,6 +164,12 @@ main (int argc, char **argv)
         ms_log (2, "Error converting samples for encoding %d\n", packencoding);
         break;
       }
+
+     //Inject json
+     if(json_input != NULL)
+     {
+       jsonInjectionSetup(msr,verbose);
+     }
 
       msr->formatversion = packversion;
 
@@ -191,6 +211,69 @@ main (int argc, char **argv)
 
   return 0;
 } /* End of main() */
+
+
+
+//Inject json routine
+int jsonInjectionSetup(MS3Record *msr, int verbose)
+{
+    size_t extra_size = 0;
+    char * extra_buf = NULL;
+    char * pretty_json = NULL;
+    JSON_Value * root_value = NULL;
+
+    ms_log(0,"Input JSON file found, serializing for injection into mseed record\n");
+    root_value = json_parse_file(json_input);
+
+
+    if(verbose==3)
+    {
+        pretty_json = json_serialize_to_string_pretty(root_value);
+        printf("Root element:\n  %s\n",pretty_json);
+        json_free_serialized_string(pretty_json);
+    }
+
+
+    extra_size =  json_serialization_size(root_value);
+
+
+    printf("extra buffer size = %zu\n",extra_size);
+
+    if ((extra_buf = (char *)malloc ((extra_size))) == NULL)
+    {
+        ms_log (2, "Cannot allocate memory for extra header buffer\n");
+
+    }
+
+    JSON_Status ierr = json_serialize_to_buffer(root_value, extra_buf, extra_size);
+
+    //Debug
+    //printf("extra buffer:\n%s\n",extra_buf);
+
+    if(ierr == JSONFailure)
+    {
+        ms_log (2, "Cannot serialize json to buffer: %s\n", json_input);
+        printf("error code = %d\n",ierr);
+        return 1;
+    }
+
+    msr->extralength = (uint16_t)(extra_size-1);
+    msr->extra = extra_buf;
+    int32_t recl = msr->reclen;
+    recl = recl + (int32_t)extra_size;
+    msr->reclen = recl;
+
+    if(root_value)
+    {
+        json_value_free(root_value);
+    }
+
+    return 0;
+
+}
+
+
+
 
 /***************************************************************************
  * convertsamples:
@@ -395,6 +478,10 @@ parameter_proc (int argcount, char **argvec)
     {
       packversion = strtol (argvec[++optind], NULL, 10);
     }
+    else if (strcmp (argvec[optind], "-j") == 0)
+    {
+      json_input = argvec[++optind];
+    }
     else if (strcmp (argvec[optind], "-o") == 0)
     {
       outputfile = argvec[++optind];
@@ -416,6 +503,8 @@ parameter_proc (int argcount, char **argvec)
     }
   }
 
+   
+
   /* Make sure an inputfile was specified */
   if (!inputfile)
   {
@@ -424,6 +513,11 @@ parameter_proc (int argcount, char **argvec)
     ms_log (1, "Try %s -h for usage\n", PACKAGE);
     exit (1);
   }
+
+    ms_log (1, "input file is %s\n", inputfile);
+
+    if(json_input)
+        ms_log (1, "JSON file is %s\n", json_input);
 
   /* Set output to STDOUT if a file is not specified */
   if (!outputfile)
@@ -479,13 +573,14 @@ usage (void)
            " -R bytes       Specify record length in bytes for packing\n"
            " -E encoding    Specify encoding format for packing\n"
            " -F version     Specify output format version, default is 3\n"
+           " -j jsonFile    Specify input json header to inject\n"
            "\n"
            " -o outfile     Specify the output file, required\n"
            "\n"
            " infile         Input miniSEED file\n"
            "\n"
            "Each record is converted independently.  This can lead to unfilled records\n"
-           "that contain padding depending on the conversion options.\n"
+           "that contain padding depending on the conversion options.\n");
 } /* End of usage() */
 
 #ifndef WIN32
