@@ -1,5 +1,5 @@
 
-// cc -Wall -O2 libmseed.a -I. mseedconvert.c -o mseedconvert
+// cc -Wall -O2 -I../libmseed mseedconvert.c -o mseedconvert ../libmseed/libmseed.a
 
 /***************************************************************************
  * mseedconvert.c
@@ -14,11 +14,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#ifndef WIN32
-#include <signal.h>
-static void term_handler (int sig);
-#endif
 
 #include <libmseed.h>
 #include <parson.h>
@@ -44,7 +39,6 @@ static int parameter_proc (int argcount, char **argvec);
 static void record_handler (char *record, int reclen, void *ptr);
 static void print_stderr (char *message);
 static void usage (void);
-static void term_handler (int sig);
 
 int jsonInjectionSetup(MS3Record *msr,int verbose);
 
@@ -63,23 +57,6 @@ main (int argc, char **argv)
   uint64_t totalpackedsamples = 0;
   uint64_t totalpackedrecords = 0;
   int8_t lastrecord;
-
-#ifndef WIN32
-  /* Signal handling, use POSIX calls with standardized semantics */
-  struct sigaction sa;
-
-  sa.sa_flags = SA_RESTART;
-  sigemptyset (&sa.sa_mask);
-
-  sa.sa_handler = term_handler;
-  sigaction (SIGINT, &sa, NULL);
-  sigaction (SIGQUIT, &sa, NULL);
-  sigaction (SIGTERM, &sa, NULL);
-
-  sa.sa_handler = SIG_IGN;
-  sigaction (SIGHUP, &sa, NULL);
-  sigaction (SIGPIPE, &sa, NULL);
-#endif
 
   /* Process given parameters (command line and parameter file) */
   if (parameter_proc (argc, argv) < 0)
@@ -582,15 +559,3 @@ usage (void)
            "Each record is converted independently.  This can lead to unfilled records\n"
            "that contain padding depending on the conversion options.\n");
 } /* End of usage() */
-
-#ifndef WIN32
-/***************************************************************************
- * term_handler:
- * Signal handler routine.
- ***************************************************************************/
-static void
-term_handler (int sig)
-{
-  exit (0);
-}
-#endif
