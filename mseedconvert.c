@@ -18,8 +18,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-
-#define VERSION "0.1"
+#define VERSION "0.2"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -31,17 +30,16 @@ static char *inputfile = NULL;
 static char *outputfile = NULL;
 static FILE *outfile = NULL;
 
-static char *json_input = NULL;
+static char *extraheaderfile = NULL;
+static char *extraheader = NULL;
+static uint16_t extraheaderlength = 0;
 
-
+static int extraheader_init (char *file);
 static int convertsamples (MS3Record *msr, int packencoding);
 static int parameter_proc (int argcount, char **argvec);
 static void record_handler (char *record, int reclen, void *ptr);
 static void print_stderr (char *message);
 static void usage (void);
-
-int jsonInjectionSetup(MS3Record *msr,int verbose);
-
 
 int
 main (int argc, char **argv)
@@ -105,11 +103,14 @@ main (int argc, char **argv)
 
       // TODO repack could determine the number of samples for INT, FLOAT32 and FLOAT64 and trim payload length
 
-     //Inject json
-     if(json_input != NULL)
-     {
-        jsonInjectionSetup(msr,verbose);
-     }
+      /* Replace extra headers */
+      if (extraheaderlength)
+      {
+        if (msr->extra)
+          free (msr->extra);
+        msr->extra       = extraheader;
+        msr->extralength = (uint16_t) extraheaderlength;
+      }
 
       reclen = msr3_repack_mseed3 (msr, rawrec, MAXRECLEN, verbose);
 
@@ -120,6 +121,13 @@ main (int argc, char **argv)
       }
 
       record_handler (rawrec, reclen, NULL);
+
+      /* Disconnect replacement extra headers from record */
+      if (extraheaderlength)
+      {
+        msr->extra = 0;
+        msr->extralength = 0;
+      }
 
       packedsamples = msr->samplecnt;
       packedrecords = 1;
@@ -142,11 +150,14 @@ main (int argc, char **argv)
         break;
       }
 
-     //Inject json
-     if(json_input != NULL)
-     {
-       jsonInjectionSetup(msr,verbose);
-     }
+      /* Replace extra headers */
+      if (extraheaderlength)
+      {
+        if (msr->extra)
+          free (msr->extra);
+        msr->extra       = extraheader;
+        msr->extralength = (uint16_t) extraheaderlength;
+      }
 
       msr->formatversion = packversion;
 
@@ -159,6 +170,13 @@ main (int argc, char **argv)
         msr->encoding = packencoding;
 
       packedrecords = msr3_pack (msr, &record_handler, NULL, &packedsamples, MSF_FLUSHDATA, verbose);
+
+      /* Disconnect replacement extra headers from record */
+      if (extraheaderlength)
+      {
+        msr->extra = 0;
+        msr->extralength = 0;
+      }
     }
 
     if (packedrecords == -1)
@@ -190,67 +208,70 @@ main (int argc, char **argv)
 } /* End of main() */
 
 
-
-//Inject json routine
-int jsonInjectionSetup(MS3Record *msr, int verbose)
+/***************************************************************************
+ * extraheader_init:
+ *
+ * Initialize extra header replacement by reading specified file,
+ * parsing JSON it contains and forming a miminized version for replacement.
+ *
+ * Returns 0 on success, and -1 on failure
+ ***************************************************************************/
+static int
+extraheader_init (char *file)
 {
-    size_t extra_size = 0;
-    char * extra_buf = NULL;
-    char * pretty_json = NULL;
-    JSON_Value * root_value = NULL;
+  JSON_Value *rootvalue = NULL;
+  size_t extrasize      = 0;
 
-    ms_log(0,"Input JSON file found, serializing for injection into mseed record\n");
-    root_value = json_parse_file(json_input);
+  rootvalue = json_parse_file (file);
 
+  if ( !rootvalue )
+  {
+    ms_log (3, "Cannot parse extra header file (%s)\n", file);
+    return -1;
+  }
 
-    if(verbose==3)
-    {
-        pretty_json = json_serialize_to_string_pretty(root_value);
-        printf("Root element:\n  %s\n",pretty_json);
-        json_free_serialized_string(pretty_json);
-    }
+  extrasize = json_serialization_size (rootvalue);
 
+  if (!extrasize)
+  {
+    ms_log (2, "Cannot determine new extrea header serialization size\n");
+    json_value_free (rootvalue);
+    return -1;
+  }
 
-    extra_size =  json_serialization_size(root_value);
+  if (extrasize > 65535)
+  {
+    ms_log (2, "New serialization size exceeds limit of 65,535 bytes: %" PRIu64 "\n",
+            (uint64_t)extrasize);
+    json_value_free (rootvalue);
+    return -1;
+  }
 
+  if (extraheader)
+    free (extraheader);
 
-    printf("extra buffer size = %zu\n",extra_size);
+  if ((extraheader = (char *)malloc ((extrasize))) == NULL)
+  {
+    ms_log (2, "Cannot allocate memory for extra header buffer\n");
+    json_value_free (rootvalue);
+    return -1;
+  }
 
-    if ((extra_buf = (char *)malloc ((extra_size))) == NULL)
-    {
-        ms_log (2, "Cannot allocate memory for extra header buffer\n");
+  if (json_serialize_to_buffer (rootvalue, extraheader, extrasize) != JSONSuccess)
+  {
+    ms_log (2, "Error serializing JSON for new extra headers\n");
+    free (extraheader);
+    json_value_free (rootvalue);
+    return -1;
+  }
 
-    }
+  extraheaderlength = extrasize - 1;
 
-    JSON_Status ierr = json_serialize_to_buffer(root_value, extra_buf, extra_size);
+  if (rootvalue)
+    json_value_free (rootvalue);
 
-    //Debug
-    //printf("extra buffer:\n%s\n",extra_buf);
-
-    if(ierr == JSONFailure)
-    {
-        ms_log (2, "Cannot serialize json to buffer: %s\n", json_input);
-        printf("error code = %d\n",ierr);
-        return 1;
-    }
-
-    msr->extralength = (uint16_t)(extra_size-1);
-    msr->extra = extra_buf;
-    int32_t recl = msr->reclen;
-    recl = recl + (int32_t)extra_size;
-    msr->reclen = recl;
-
-    if(root_value)
-    {
-        json_value_free(root_value);
-    }
-
-    return 0;
-
-}
-
-
-
+  return 0;
+} /* End of extraheader_init() */
 
 /***************************************************************************
  * convertsamples:
@@ -455,9 +476,9 @@ parameter_proc (int argcount, char **argvec)
     {
       packversion = strtol (argvec[++optind], NULL, 10);
     }
-    else if (strcmp (argvec[optind], "-j") == 0)
+    else if (strcmp (argvec[optind], "-eh") == 0)
     {
-      json_input = argvec[++optind];
+      extraheaderfile = argvec[++optind];
     }
     else if (strcmp (argvec[optind], "-o") == 0)
     {
@@ -480,8 +501,6 @@ parameter_proc (int argcount, char **argvec)
     }
   }
 
-   
-
   /* Make sure an inputfile was specified */
   if (!inputfile)
   {
@@ -491,10 +510,15 @@ parameter_proc (int argcount, char **argvec)
     exit (1);
   }
 
-    ms_log (1, "input file is %s\n", inputfile);
-
-    if(json_input)
-        ms_log (1, "JSON file is %s\n", json_input);
+  /* Prepare specified replacement extra headers */
+  if (extraheaderfile)
+  {
+    if (extraheader_init (extraheaderfile))
+    {
+      ms_log (2, "Cannot read extra header file\n");
+      exit (1);
+    }
+  }
 
   /* Set output to STDOUT if a file is not specified */
   if (!outputfile)
@@ -550,7 +574,7 @@ usage (void)
            " -R bytes       Specify record length in bytes for packing\n"
            " -E encoding    Specify encoding format for packing\n"
            " -F version     Specify output format version, default is 3\n"
-           " -j jsonFile    Specify input json header to inject\n"
+           " -eh JSONFile   Specify replacement extra headers in JSON format\n"
            "\n"
            " -o outfile     Specify the output file, required\n"
            "\n"
