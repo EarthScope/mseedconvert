@@ -179,13 +179,16 @@ main (int argc, char **argv)
         break;
       }
 
-      // TODO, refuse to repack retired encodings, map integers to Steim-1
+      // TODO, refuse to repack retired encodings, map to Steim-1
 
       /* Convert sample type as needed for packencoding */
-      if (convertsamples (msr, packencoding))
+      if (packencoding >= 0 && msr->encoding != packencoding)
       {
-        ms_log (2, "Error converting samples for encoding %d\n", packencoding);
-        break;
+        if (convertsamples (msr, packencoding))
+        {
+          ms_log (2, "Error converting samples for encoding %d\n", packencoding);
+          break;
+        }
       }
 
       /* Replace extra headers */
