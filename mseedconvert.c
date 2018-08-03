@@ -18,7 +18,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -55,6 +55,8 @@ main (int argc, char **argv)
   uint64_t totalpackedsamples = 0;
   uint64_t totalpackedrecords = 0;
   int8_t lastrecord;
+  int bigendianhost = ms_bigendianhost ();
+  int repackheaderV3 = 0;
 
   /* Process given parameters (command line and parameter file) */
   if (parameter_proc (argc, argv) < 0)
@@ -84,17 +86,46 @@ main (int argc, char **argv)
     if (verbose >= 1)
       msr3_print (msr, verbose - 1);
 
-    //TODO the shortcut can only be used for Steim[12], i.e. when encoding is known to be transportable
-    // others, i.e. ints, floats, can be the wrong byte order.
-
-    // Test for litte-endian Steim[12] before converting without re-encoding
-
-    // If the datapayload byte order is known it could be swapped here?
-
-    /* Conversion to version 3, if unpacking data is not needed */
+    /* Determine if unpacking data is not needed when converting to version 3 */
     if (forcerepack == 0 && packversion == 3 &&
-        (packencoding < 0 || packencoding == msr->encoding || msr->samplecnt == 0))
+        (packencoding < 0 || packencoding == msr->encoding))
     {
+      /* Steim encodings must be big endian */
+      if (msr->encoding == DE_STEIM1 || msr->encoding == DE_STEIM2)
+      {
+        /* If BE host and swapping not needed, data payload is BE */
+        if (bigendianhost && !(msr->swapflag & MSSWAP_PAYLOAD))
+          repackheaderV3 = 1;
+        /* If LE host and swapping is needed, data payload is BE */
+        else if (!bigendianhost && (msr->swapflag & MSSWAP_PAYLOAD))
+          repackheaderV3 = 1;
+      }
+
+      /* Integer and float encodings must be litte endian */
+      else if (msr->encoding == DE_INT16 || msr->encoding == DE_INT32 ||
+               msr->encoding == DE_FLOAT32 || msr->encoding == DE_FLOAT64)
+      {
+        /* If BE host and swapping is needed, data payload is LE */
+        if (bigendianhost && (msr->swapflag & MSSWAP_PAYLOAD))
+          repackheaderV3 = 1;
+        /* If LE host and swapping is not needed, data payload is LE */
+        else if (!bigendianhost && !(msr->swapflag & MSSWAP_PAYLOAD))
+          repackheaderV3 = 1;
+      }
+
+      /* Text (ASCII) encoding does not need repacking */
+      else if (msr->encoding == DE_ASCII)
+      {
+        repackheaderV3 = 1;
+      }
+    }
+
+    /* Avoid re-packing of data payload if not needed for version 3 output */
+    if (packversion == 3 && (repackheaderV3 || msr->samplecnt == 0))
+    {
+      if (verbose)
+        ms_log (1, "Re-packing record without re-packing encoded data payload\n");
+
       if (!rawrec && (rawrec = (char *)malloc (MAXRECLEN)) == NULL)
       {
         ms_log (2, "Cannot allocate memory for record buffer\n");
@@ -102,6 +133,7 @@ main (int argc, char **argv)
       }
 
       // TODO repack could determine the number of samples for INT, FLOAT32 and FLOAT64 and trim payload length
+      // This should be done in msr3_data_bounds() as a generic solution
 
       /* Replace extra headers */
       if (extraheaderlength)
@@ -112,6 +144,7 @@ main (int argc, char **argv)
         msr->extralength = (uint16_t) extraheaderlength;
       }
 
+      /* Re-packed a parsed record into a version 3 header using raw encoded data */
       reclen = msr3_repack_mseed3 (msr, rawrec, MAXRECLEN, verbose);
 
       if (reclen < 0)
@@ -135,6 +168,9 @@ main (int argc, char **argv)
     /* Otherwise, unpack samples and repack record */
     else
     {
+      if (verbose)
+        ms_log (1, "Re-packing record with decoded data\n");
+
       msr->numsamples = msr3_unpack_data (msr, verbose);
 
       if (msr->numsamples < 0)
@@ -142,6 +178,8 @@ main (int argc, char **argv)
         ms_log (2, "%s: Cannot unpack data samples\n", msr->tsid);
         break;
       }
+
+      // TODO, refuse to repack retired encodings, map integers to Steim-1
 
       /* Convert sample type as needed for packencoding */
       if (convertsamples (msr, packencoding))
