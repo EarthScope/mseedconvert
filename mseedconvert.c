@@ -18,7 +18,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -36,6 +36,7 @@ static uint16_t extraheaderlength = 0;
 
 static int extraheader_init (char *file);
 static int convertsamples (MS3Record *msr, int packencoding);
+static int retired_encoding (int8_t encoding);
 static int parameter_proc (int argcount, char **argvec);
 static void record_handler (char *record, int reclen, void *ptr);
 static void print_stderr (char *message);
@@ -132,9 +133,6 @@ main (int argc, char **argv)
         break;
       }
 
-      // TODO repack could determine the number of samples for INT, FLOAT32 and FLOAT64 and trim payload length
-      // This should be done in msr3_data_bounds() as a generic solution
-
       /* Replace extra headers */
       if (extraheaderlength)
       {
@@ -179,18 +177,6 @@ main (int argc, char **argv)
         break;
       }
 
-      // TODO, refuse to repack retired encodings, map to Steim-1
-
-      /* Convert sample type as needed for packencoding */
-      if (packencoding >= 0 && msr->encoding != packencoding)
-      {
-        if (convertsamples (msr, packencoding))
-        {
-          ms_log (2, "Error converting samples for encoding %d\n", packencoding);
-          break;
-        }
-      }
-
       /* Replace extra headers */
       if (extraheaderlength)
       {
@@ -209,6 +195,23 @@ main (int argc, char **argv)
 
       if (packencoding >= 0)
         msr->encoding = packencoding;
+
+      if (retired_encoding (msr->encoding))
+      {
+        ms_log (2, "Packing for encoding %d not allowed, specify supported encoding with -E\n",
+                msr->encoding);
+        break;
+      }
+
+      /* Convert sample type as needed for packencoding */
+      if (packencoding >= 0 && msr->encoding != packencoding)
+      {
+        if (convertsamples (msr, packencoding))
+        {
+          ms_log (2, "Cannot convert samples for encoding %d\n", packencoding);
+          break;
+        }
+      }
 
       packedrecords = msr3_pack (msr, &record_handler, NULL, &packedsamples, MSF_FLUSHDATA, verbose);
 
@@ -472,6 +475,43 @@ convertsamples (MS3Record *msr, int packencoding)
   return 0;
 } /* End of convertsamples() */
 
+
+/***************************************************************************
+ * retired_encoding:
+ *
+ * Determine if encoding is retired:
+ *
+ *  2 (24-bit integers)
+ *  12 (GEOSCOPE multiplexed format 24-bit integer)
+ *  13 (GEOSCOPE multiplexed format 16-bit gain ranged, 3-bit exponent)
+ *  14 (GEOSCOPE multiplexed format 16-bit gain ranged, 4-bit exponent)
+ *  15 (US National Network compression)
+ *  16 (CDSN 16-bit gain ranged)
+ *  17 (Graefenberg 16-bit gain ranged)
+ *  18 (IPG-Strasbourg 16-bit gain ranged)
+ *  30 (SRO format)
+ *  31 (HGLP format)
+ *  32 (DWWSSN gain ranged format)
+ *  33 (RSTN 16-bit gain ranged format)
+ *
+ * Returns 1 if encoding is retired, otherwise 0.
+ ***************************************************************************/
+static int
+retired_encoding (int8_t encoding)
+{
+
+  if (encoding == 2 || encoding == 12 || encoding == 13 ||
+      encoding == 14 || encoding == 15 || encoding == 16 ||
+      encoding == 17 || encoding == 18 || encoding == 30 ||
+      encoding == 31 || encoding == 32 || encoding == 33)
+  {
+    return 1;
+  }
+
+  return 0;
+} /* End of retired_encoding() */
+
+
 /***************************************************************************
  * parameter_proc:
  *
@@ -548,6 +588,13 @@ parameter_proc (int argcount, char **argvec)
     ms_log (2, "No input file was specified\n\n");
     ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
     ms_log (1, "Try %s -h for usage\n", PACKAGE);
+    exit (1);
+  }
+
+  if (packencoding >= 0 && retired_encoding (packencoding))
+  {
+    ms_log (2, "Packing for encoding %d not allowed, specify supported encoding with -E\n",
+            packencoding);
     exit (1);
   }
 
