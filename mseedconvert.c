@@ -173,7 +173,7 @@ main (int argc, char **argv)
 
       if (msr->numsamples < 0)
       {
-        ms_log (2, "%s: Cannot unpack data samples\n", msr->tsid);
+        ms_log (2, "%s: Cannot unpack data samples\n", msr->sid);
         break;
       }
 
