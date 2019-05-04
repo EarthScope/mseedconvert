@@ -1,6 +1,3 @@
-
-// cc -Wall -O2 -I../libmseed mseedconvert.c -o mseedconvert ../libmseed/libmseed.a
-
 /***************************************************************************
  * mseedconvert.c
  *
@@ -18,7 +15,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -193,10 +190,7 @@ main (int argc, char **argv)
       else if (msr->formatversion == 3)
         msr->reclen = MAXRECLEN;
 
-      if (packencoding >= 0)
-        msr->encoding = packencoding;
-
-      if (retired_encoding (msr->encoding))
+      if (retired_encoding ((packencoding >= 0) ? packencoding : msr->encoding))
       {
         ms_log (2, "Packing for encoding %d not allowed, specify supported encoding with -E\n",
                 msr->encoding);
@@ -212,6 +206,9 @@ main (int argc, char **argv)
           break;
         }
       }
+
+      if (packencoding >= 0)
+        msr->encoding = packencoding;
 
       packedrecords = msr3_pack (msr, &record_handler, NULL, &packedsamples, MSF_FLUSHDATA, verbose);
 
