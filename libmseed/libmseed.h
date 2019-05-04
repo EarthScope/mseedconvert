@@ -31,8 +31,8 @@
 extern "C" {
 #endif
 
-#define LIBMSEED_VERSION "3.0.2"    //!< Library version
-#define LIBMSEED_RELEASE "2019.103" //!< Library release date
+#define LIBMSEED_VERSION "3.0.3"    //!< Library version
+#define LIBMSEED_RELEASE "2019.123" //!< Library release date
 
 /* C99 standard headers */
 #include <stdlib.h>
@@ -324,6 +324,10 @@ extern int ms_parse_raw2 (char *record, int maxreclen, int8_t details, int8_t sw
     and time ranges, that are desired.  Capability is included to read
     selections from files and to match data against a selection list.
 
+    For data to be selected it must only match one of the selection
+    entries.  In other words, multiple selection entries are treated
+    with OR logic.
+
     The ms3_readmsr_selection() and ms3_readtracelist_selection()
     routines accept ::MS3Selections and allow selective (and
     efficient) reading of data from files.
@@ -331,8 +335,8 @@ extern int ms_parse_raw2 (char *record, int maxreclen, int8_t details, int8_t sw
 
 /** @brief Data selection structure time window definition containers */
 typedef struct MS3SelectTime {
-  nstime_t starttime;                //!< Earliest data for matching channels
-  nstime_t endtime;                  //!< Latest data for matching channels
+  nstime_t starttime;                //!< Earliest data for matching channels, use ::NSTERROR for open
+  nstime_t endtime;                  //!< Latest data for matching channels, use ::NSTERROR for open
   struct MS3SelectTime *next;        //!< Pointer to next selection time, NULL if the last
 } MS3SelectTime;
 
@@ -430,7 +434,7 @@ typedef struct MS3TraceSeg {
 /** @brief Container for a trace ID, linkable */
 typedef struct MS3TraceID {
   char            sid[LM_SIDLEN];    //!< Source identifier as URN, max length @ref LM_SIDLEN
-  uint8_t         pubversion;        //!< Publication version
+  uint8_t         pubversion;        //!< Largest contributing publication version
   nstime_t        earliest;          //!< Time of earliest sample
   nstime_t        latest;            //!< Time of latest sample
   void           *prvtptr;           //!< Private pointer for general use, unused by library

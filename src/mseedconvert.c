@@ -15,7 +15,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
