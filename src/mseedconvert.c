@@ -15,7 +15,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.6"
+#define VERSION "0.7"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -72,6 +72,10 @@ main (int argc, char **argv)
 
       return 1;
     }
+  }
+  else
+  {
+    outfile = stdout;
   }
 
   /* Set flag to skip non-data */
