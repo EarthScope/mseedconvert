@@ -5,19 +5,17 @@
  *
  * This file is part of the miniSEED Library.
  *
- * The miniSEED Library is free software; you can redistribute it
- * and/or modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 3 of the License, or (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * The miniSEED Library is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License (GNU-LGPL) for more details.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this software. If not, see
- * <https://www.gnu.org/licenses/>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
  * Copyright (C) 2019:
  * @author Chad Trabant, IRIS Data Management Center
@@ -31,8 +29,8 @@
 extern "C" {
 #endif
 
-#define LIBMSEED_VERSION "3.0.4"    //!< Library version
-#define LIBMSEED_RELEASE "2019.161" //!< Library release date
+#define LIBMSEED_VERSION "3.0.5"    //!< Library version
+#define LIBMSEED_RELEASE "2019.166" //!< Library release date
 
 /** @defgroup io-functions File I/O */
 /** @defgroup miniseed-record Record Handling */
@@ -67,6 +65,9 @@ extern "C" {
 #include <string.h>
 #include <ctype.h>
 
+/* Print conversion for size_t values */
+#define PRIsize_t "zu"
+
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
   #define LMP_WIN 1
 #endif
@@ -75,6 +76,14 @@ extern "C" {
 #if defined(LMP_WIN)
   #include <windows.h>
   #include <sys/types.h>
+
+  /* Re-define print conversion for size_t values */
+  #undef PRIsize_t
+  #if defined(WIN64) || defined(_WIN64)
+    #define PRIsize_t "I64u"
+  #else
+    #define PRIsize_t "I32u"
+  #endif
 
   /* For MSVC 2012 and earlier define standard int types, otherwise use inttypes.h */
   #if defined(_MSC_VER) && _MSC_VER <= 1700
@@ -90,7 +99,7 @@ extern "C" {
     #include <inttypes.h>
   #endif
 
-  /* For MSVC define PRId64 and SCNd64 if needed */
+  /* For MSVC define PRId64 and SCNd64 and alternate functions */
   #if defined(_MSC_VER)
     #if !defined(PRId64)
       #define PRId64 "I64d"
@@ -568,9 +577,9 @@ extern int64_t mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *
                                         size_t outputsize, int8_t verbose);
 extern int mstl3_convertsamples (MS3TraceSeg *seg, char type, int8_t truncate);
 extern int mstl3_resize_buffers (MS3TraceList *mstl);
-extern int mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
-                       void *handlerdata, int reclen, int8_t encoding,
-                       int64_t *packedsamples, uint32_t flags, int8_t verbose, char *extra);
+extern int64_t mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
+                           void *handlerdata, int reclen, int8_t encoding,
+                           int64_t *packedsamples, uint32_t flags, int8_t verbose, char *extra);
 extern void mstl3_printtracelist (MS3TraceList *mstl, ms_timeformat_t timeformat,
                                   int8_t details, int8_t gaps);
 extern void mstl3_printsynclist (MS3TraceList *mstl, char *dccid, ms_subseconds_t subseconds);

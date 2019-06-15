@@ -5,70 +5,69 @@
  *
  * Copyright (c) 2019 Chad Trabant, IRIS Data Management Center
  *
- * The miniSEED Library is free software; you can redistribute it
- * and/or modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 3 of the License, or (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * The miniSEED Library is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License (GNU-LGPL) for more details.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this software. If not, see
- * <https://www.gnu.org/licenses/>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  ***************************************************************************/
 
+#include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <errno.h>
 
 #include <libmseed.h>
 
 int
 main (int argc, char **argv)
 {
-  struct stat sb = {0};
+  struct stat sb  = {0};
   int64_t records = 0;
   FILE *fh;
 
-  MS3TraceList *mstl = NULL;
-  char *buffer = NULL;
+  MS3TraceList *mstl    = NULL;
+  char *buffer          = NULL;
   uint64_t bufferlength = 0;
-  int8_t splitversion = 0;
-  uint32_t flags = 0;
-  int8_t verbose = 0;
+  int8_t splitversion   = 0;
+  uint32_t flags        = 0;
+  int8_t verbose        = 0;
 
   if (argc != 2)
   {
-    ms_log (2, "%s requires a single file name argument\n",argv[0]);
+    ms_log (2, "%s requires a single file name argument\n", argv[0]);
     return -1;
   }
 
   /* Read specified file into buffer */
-  if (!(fh = fopen(argv[1], "rb")))
+  if (!(fh = fopen (argv[1], "rb")))
   {
-    ms_log (2, "Error opening %s: %s\n", argv[1], strerror(errno));
+    ms_log (2, "Error opening %s: %s\n", argv[1], strerror (errno));
     return -1;
   }
-  if (fstat (fileno(fh), &sb))
+  if (fstat (fileno (fh), &sb))
   {
-    ms_log (2, "Error stating %s: %s\n", argv[1], strerror(errno));
+    ms_log (2, "Error stating %s: %s\n", argv[1], strerror (errno));
     return -1;
   }
-  if (!(buffer = (char *)malloc(sb.st_size)))
+  if (!(buffer = (char *)malloc (sb.st_size)))
   {
-    ms_log (2, "Error allocating buffer of %lld bytes\n", (long long int)sb.st_size);
+    ms_log (2, "Error allocating buffer of %" PRIsize_t " bytes\n",
+            (sb.st_size >= 0) ? (size_t)sb.st_size : 0);
     return -1;
   }
-  if (fread(buffer, sb.st_size, 1, fh) != 1)
+  if (fread (buffer, sb.st_size, 1, fh) != 1)
   {
     ms_log (2, "Error reading file\n");
     return -1;
   }
 
-  fclose(fh);
+  fclose (fh);
 
   bufferlength = sb.st_size;
 
@@ -90,7 +89,7 @@ main (int argc, char **argv)
 
   if (records < 0)
   {
-    ms_log (2, "Problem reading miniSEED from buffer: %s\n", ms_errorstr(records));
+    ms_log (2, "Problem reading miniSEED from buffer: %s\n", ms_errorstr (records));
   }
 
   /* Print summary */

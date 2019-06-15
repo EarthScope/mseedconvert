@@ -6,19 +6,17 @@
  *
  * Copyright (c) 2019 Chad Trabant, IRIS Data Management Center
  *
- * The miniSEED Library is free software; you can redistribute it
- * and/or modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 3 of the License, or (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * The miniSEED Library is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License (GNU-LGPL) for more details.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this software. If not, see
- * <https://www.gnu.org/licenses/>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  ***************************************************************************/
 
 #include <stdio.h>
@@ -193,7 +191,7 @@ msr3_pack_mseed3 (MS3Record *msr, void (*record_handler) (char *, int, void *),
 
   if (msr->reclen < (MS3FSDH_LENGTH + strlen(msr->sid) + msr->extralength))
   {
-    ms_log (2, "%s(%s): Record length (%d) is not large enough for header (%d), SID (%zu), and extra (%d)\n",
+    ms_log (2, "%s(%s): Record length (%d) is not large enough for header (%d), SID (%"PRIsize_t"), and extra (%d)\n",
             __func__, msr->sid, msr->reclen, MS3FSDH_LENGTH, strlen(msr->sid), msr->extralength);
     return -1;
   }
@@ -508,7 +506,7 @@ msr3_pack_header3 (MS3Record *msr, char *record, uint32_t recbuflen, int8_t verb
 
   if (recbuflen < (uint32_t)(MS3FSDH_LENGTH + sidlength + msr->extralength))
   {
-    ms_log (2, "%s(%s): Buffer length (%d) is not large enough for fixed header (%d), SID (%zu), and extra (%d)\n",
+    ms_log (2, "%s(%s): Buffer length (%d) is not large enough for fixed header (%d), SID (%"PRIsize_t"), and extra (%d)\n",
             __func__, msr->sid, msr->reclen, MS3FSDH_LENGTH, sidlength, msr->extralength);
     return -1;
   }
@@ -529,7 +527,7 @@ msr3_pack_header3 (MS3Record *msr, char *record, uint32_t recbuflen, int8_t verb
   /* Ensure that SID length fits in format, which uses data type uint8_t */
   if (sidlength > 255)
   {
-    ms_log (2, "%s(%s): Source ID too long: %zu bytes\n", __func__, msr->sid, sidlength);
+    ms_log (2, "%s(%s): Source ID too long: %"PRIsize_t" bytes\n", __func__, msr->sid, sidlength);
     return -1;
   }
 
@@ -1596,7 +1594,7 @@ msr_pack_data (void *dest, void *src, int maxsamples, int maxdatabytes,
 
     if (maxdatabytes < sizeof(int16_t))
     {
-      ms_log (2, "%s: Not enough space in record (%d) for INT16 encoding, need at least %zu bytes\n",
+      ms_log (2, "%s: Not enough space in record (%d) for INT16 encoding, need at least %"PRIsize_t" bytes\n",
               sid, maxdatabytes, sizeof(int16_t));
       return -1;
     }
@@ -1621,7 +1619,7 @@ msr_pack_data (void *dest, void *src, int maxsamples, int maxdatabytes,
 
     if (maxdatabytes < sizeof(int32_t))
     {
-      ms_log (2, "%s: Not enough space in record (%d) for INT32 encoding, need at least %zu bytes\n",
+      ms_log (2, "%s: Not enough space in record (%d) for INT32 encoding, need at least %"PRIsize_t" bytes\n",
               sid, maxdatabytes, sizeof(int32_t));
       return -1;
     }
@@ -1646,7 +1644,7 @@ msr_pack_data (void *dest, void *src, int maxsamples, int maxdatabytes,
 
     if (maxdatabytes < sizeof(float))
     {
-      ms_log (2, "%s: Not enough space in record (%d) for FLOAT32 encoding, need at least %zu bytes\n",
+      ms_log (2, "%s: Not enough space in record (%d) for FLOAT32 encoding, need at least %"PRIsize_t" bytes\n",
               sid, maxdatabytes, sizeof(float));
       return -1;
     }
@@ -1671,7 +1669,7 @@ msr_pack_data (void *dest, void *src, int maxsamples, int maxdatabytes,
 
     if (maxdatabytes < sizeof(double))
     {
-      ms_log (2, "%s: Not enough space in record (%d) for FLOAT64 encoding, need at least %zu bytes\n",
+      ms_log (2, "%s: Not enough space in record (%d) for FLOAT64 encoding, need at least %"PRIsize_t" bytes\n",
               sid, maxdatabytes, sizeof(double));
       return -1;
     }

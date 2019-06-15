@@ -5,19 +5,17 @@
  *
  * Copyright (c) 2019 Chad Trabant, IRIS Data Management Center
  *
- * The miniSEED Library is free software; you can redistribute it
- * and/or modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 3 of the License, or (at your option) any later version.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * The miniSEED Library is distributed in the hope that it will be
- * useful, but WITHOUT ANY WARRANTY; without even the implied warranty
- * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License (GNU-LGPL) for more details.
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this software. If not, see
- * <https://www.gnu.org/licenses/>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  ***************************************************************************/
 
 #include <errno.h>
@@ -1581,7 +1579,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
   {
     if (decodedsize > outputsize)
     {
-      ms_log (2, "%s(%s): Output buffer (%zu bytes) is not large enought for decoded data (%zu bytes)\n",
+      ms_log (2, "%s(%s): Output buffer (%"PRIsize_t" bytes) is not large enought for decoded data (%"PRIsize_t" bytes)\n",
               __func__, id->sid, decodedsize, outputsize);
       return -1;
     }
@@ -1802,7 +1800,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  * intended to allow using a ::MS3TraceList as an intermediate
  * collection of data buffers to generate data records from an
  * arbitrarily large data source, e.g. continuous data.  In this
- * concept, data are added to a ::MS3TraceList and mstl3_pack() is
+ * pattern, data are added to a ::MS3TraceList and mstl3_pack() is
  * called repeatedly.  Data records are only produced if a complete
  * record can be generated, which often leaves small amounts of data
  * in each segment buffer.  On completion or shutdown the caller
@@ -1817,6 +1815,11 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  * record, the memory will be re-used or freed when \a
  * record_handler() returns.
  *
+ * The requested \a encoding value is currently only used for integer
+ * data samples. The encoding is set automatially for text (ASCII) and
+ * floating point data samples as there is only a single encoding for
+ * them.  A value of \c -1 can be used to request the default.
+ *
  * If \a extra is not NULL it is expected to contain extraheaders, a
  * string containing (compact) JSON, that will be added to each output
  * record.
@@ -1824,7 +1827,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  * @param[in] mstl ::MS3TraceList containing data to pack
  * @param[in] record_handler() Callback function called for each record
  * @param[in] handlerdata A pointer that will be provided to the \a record_handler()
- * @param[in] reclen Maximum record length to produce
+ * @param[in] reclen Maximum record length to create
  * @param[in] encoding Encoding for data samples, see msr3_pack()
  * @param[out] packedsamples The number of samples packed, returned to caller
  * @param[in] flags Bit flags to control packing:
@@ -1840,7 +1843,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  *
  * \sa msr3_pack()
  ***************************************************************************/
-int
+int64_t
 mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
             void *handlerdata, int reclen, int8_t encoding,
             int64_t *packedsamples, uint32_t flags, int8_t verbose,
@@ -1850,7 +1853,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
   MS3TraceID *id = NULL;
   MS3TraceSeg *seg = NULL;
 
-  int totalpackedrecords = 0;
+  int64_t totalpackedrecords = 0;
   int64_t totalpackedsamples = 0;
   int segpackedrecords = 0;
   int64_t segpackedsamples = 0;
@@ -1884,7 +1887,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
 
     if (extralength > UINT16_MAX)
     {
-      ms_log (2, "%s(): Extra headers are too long: %zu\n",
+      ms_log (2, "%s(): Extra headers are too long: %"PRIsize_t"\n",
               __func__, extralength);
       return -1;
     }
@@ -1909,6 +1912,22 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
       msr->datasamples = seg->datasamples;
       msr->numsamples = seg->numsamples;
       msr->sampletype = seg->sampletype;
+
+      /* Set encoding for data types with only one encoding, otherwise requested */
+      switch (seg->sampletype)
+      {
+      case 'a':
+        msr->encoding = DE_ASCII;
+        break;
+      case 'f':
+        msr->encoding = DE_FLOAT32;
+        break;
+      case 'd':
+        msr->encoding = DE_FLOAT64;
+        break;
+      default:
+        msr->encoding = encoding;
+      }
 
       segpackedsamples = 0;
       segpackedrecords = msr3_pack (msr, record_handler, handlerdata, &segpackedsamples, flags, verbose);
