@@ -43,7 +43,8 @@
 MS3Record *
 msr3_init (MS3Record *msr)
 {
-  void *datasamples = 0;
+  void *datasamples = NULL;
+  size_t datasize = 0;
 
   if (!msr)
   {
@@ -52,6 +53,7 @@ msr3_init (MS3Record *msr)
   else
   {
     datasamples = msr->datasamples;
+    datasize = msr->datasize;
 
     if (msr->extra)
       libmseed_memory.free (msr->extra);
@@ -66,6 +68,7 @@ msr3_init (MS3Record *msr)
   memset (msr, 0, sizeof (MS3Record));
 
   msr->datasamples = datasamples;
+  msr->datasize = datasize;
 
   msr->reclen    = -1;
   msr->samplecnt = -1;
@@ -116,6 +119,7 @@ MS3Record *
 msr3_duplicate (MS3Record *msr, int8_t datadup)
 {
   MS3Record *dupmsr = 0;
+  size_t datasize = 0;
   int samplesize = 0;
 
   if (!msr)
@@ -159,21 +163,25 @@ msr3_duplicate (MS3Record *msr, int8_t datadup)
       return NULL;
     }
 
+    datasize = msr->numsamples * samplesize;
+
     /* Allocate memory for new data array */
-    if ((dupmsr->datasamples = libmseed_memory.malloc ((size_t) (msr->numsamples * samplesize))) == NULL)
+    if ((dupmsr->datasamples = libmseed_memory.malloc ((size_t) (datasize))) == NULL)
     {
       ms_log (2, "%s(): Error allocating memory\n", __func__);
       msr3_free (&dupmsr);
       return NULL;
     }
+    msr->datasize = datasize;
 
-    memcpy (dupmsr->datasamples, msr->datasamples, ((size_t) (msr->numsamples * samplesize)));
+    memcpy (dupmsr->datasamples, msr->datasamples, datasize);
   }
   /* Otherwise make sure the sample array and count are zero */
   else
   {
-    dupmsr->datasamples = 0;
-    dupmsr->numsamples  = 0;
+    dupmsr->datasamples = NULL;
+    dupmsr->datasize = 0;
+    dupmsr->numsamples = 0;
   }
 
   return dupmsr;
@@ -239,13 +247,13 @@ msr3_print (MS3Record *msr, int8_t details)
     ms_log (0, "%s, version %d, %d bytes (format: %d)\n",
             msr->sid, msr->pubversion, msr->reclen, msr->formatversion);
     ms_log (0, "             start time: %s\n", time);
-    ms_log (0, "      number of samples: %d\n", msr->samplecnt);
+    ms_log (0, "      number of samples: %" PRId64 "\n", msr->samplecnt);
     ms_log (0, "       sample rate (Hz): %.10g\n", msr3_sampratehz(msr));
 
     if (details > 1)
     {
       b = msr->flags;
-      ms_log (0, "                  flags: [%u%u%u%u%u%u%u%u] 8 bits\n",
+      ms_log (0, "                  flags: [%d%d%d%d%d%d%d%d] 8 bits\n",
               bit (b, 0x01), bit (b, 0x02), bit (b, 0x04), bit (b, 0x08),
               bit (b, 0x10), bit (b, 0x20), bit (b, 0x40), bit (b, 0x80));
       if (b & 0x01)
@@ -287,6 +295,48 @@ msr3_print (MS3Record *msr, int8_t details)
 } /* End of msr3_print() */
 
 /**********************************************************************/ /**
+ * @brief Resize data sample buffer of ::MS3Record to what is needed
+ *
+ * This routine should only be used if pre-allocation of memory, via
+ * ::libmseed_prealloc_block_size, was enabled to allocate the buffer.
+ *
+ * @param[in] msr ::MS3Record to resize buffer
+ *
+ * @returns Return 0 on success, otherwise returns a libmseed error code.
+ ***************************************************************************/
+int
+msr3_resize_buffer (MS3Record *msr)
+{
+  uint8_t samplesize = 0;
+  size_t datasize;
+
+  if (!msr)
+    return MS_GENERROR;
+
+  samplesize = ms_samplesize(msr->sampletype);
+
+  if (samplesize && msr->datasamples && msr->numsamples > 0)
+  {
+    datasize = (size_t) msr->numsamples * samplesize;
+
+    if (msr->datasize > datasize)
+    {
+      msr->datasamples = libmseed_memory.realloc (msr->datasamples, datasize);
+
+      if (msr->datasamples == NULL)
+      {
+        ms_log (2, "%s(%s): Cannot (re)allocate memory\n", __func__, msr->sid);
+        return MS_GENERROR;
+      }
+
+      msr->datasize = datasize;
+    }
+  }
+
+  return 0;
+} /* End of msr3_resize_buffer() */
+
+/**********************************************************************/ /**
  * @brief Calculate sample rate in samples/second (Hertz) for a given ::MS3Record
  *
  * @param[in] msr ::MS3Record to calculate sample rate for
@@ -296,6 +346,9 @@ msr3_print (MS3Record *msr, int8_t details)
 inline double
 msr3_sampratehz (MS3Record *msr)
 {
+  if (!msr)
+    return 0.0;
+
   if (msr->samprate < 0.0)
     return (-1.0 / msr->samprate);
   else

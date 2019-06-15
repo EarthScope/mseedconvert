@@ -20,6 +20,7 @@
  * <https://www.gnu.org/licenses/>
  ***************************************************************************/
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,8 +31,7 @@
 MS3TraceSeg *mstl3_msr2seg (MS3Record *msr, nstime_t endtime);
 MS3TraceSeg *mstl3_addmsrtoseg (MS3TraceSeg *seg, MS3Record *msr, nstime_t endtime, int8_t whence);
 MS3TraceSeg *mstl3_addsegtoseg (MS3TraceSeg *seg1, MS3TraceSeg *seg2);
-MS3Metadata *mstl3_add_metadata (MS3TraceSeg *seg, MS3Record *msr);
-
+MS3RecordPtr *mstl3_add_recordptr (MS3TraceSeg *seg, MS3Record *msr, nstime_t endtime, int8_t whence);
 
 /**********************************************************************/ /**
  * @brief Initialize a ::MS3TraceList container
@@ -71,8 +71,9 @@ mstl3_init (MS3TraceList *mstl)
  * The pointer to the target ::MS3TraceList will be set to NULL.
  *
  * @param[in] ppmstl Pointer-to-pointer to the target ::MS3TraceList to free
- * @param[in] freeprvtptr If true, also free any data at the \a prvtptr
- * members of ::MS3TraceID.prvtptr and ::MS3TraceSeg.prvtptr
+ * @param[in] freeprvtptr If true, also free any data at the \a
+ * prvtptr members of ::MS3TraceID.prvtptr, ::MS3TraceSeg.prvtptr, and
+ * ::MS3RecordPtr.prvtptr (in ::MS3TraceSeg.recordlist)
  ***************************************************************************/
 void
 mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
@@ -81,8 +82,8 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
   MS3TraceID *nextid = 0;
   MS3TraceSeg *seg = 0;
   MS3TraceSeg *nextseg = 0;
-  MS3Metadata *metadata;
-  MS3Metadata *nextmetadata;
+  MS3RecordPtr *recordptr;
+  MS3RecordPtr *nextrecordptr;
 
   if (!ppmstl)
     return;
@@ -101,7 +102,7 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
       {
         nextseg = seg->next;
 
-        /* Free private pointer data if present and requested*/
+        /* Free private pointer data if present and requested */
         if (freeprvtptr && seg->prvtptr)
           libmseed_memory.free (seg->prvtptr);
 
@@ -109,25 +110,33 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
         if (seg->datasamples)
           libmseed_memory.free (seg->datasamples);
 
-        /* Free associated metadata list */
-        metadata = seg->metadata;
-        while (metadata)
+        /* Free associated record list and related private pointers */
+        if (seg->recordlist)
         {
-          nextmetadata = metadata->next;
+          recordptr = seg->recordlist->first;
+          while (recordptr)
+          {
+            nextrecordptr = recordptr->next;
 
-          if (metadata->extra)
-            libmseed_memory.free (metadata->extra);
+            if (recordptr->msr)
+              msr3_free (&recordptr->msr);
 
-          libmseed_memory.free (metadata);
+            if (freeprvtptr && recordptr->prvtptr)
+              libmseed_memory.free (recordptr->prvtptr);
 
-          metadata = nextmetadata;
+            libmseed_memory.free (recordptr);
+
+            recordptr = nextrecordptr;
+          }
+
+          libmseed_memory.free (seg->recordlist);
         }
 
         libmseed_memory.free (seg);
         seg = nextseg;
       }
 
-      /* Free private pointer data if present and requested*/
+      /* Free private pointer data if present and requested */
       if (freeprvtptr && id->prvtptr)
         libmseed_memory.free (id->prvtptr);
 
@@ -143,6 +152,7 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
   return;
 } /* End of mstl3_free() */
 
+
 /**********************************************************************/ /**
  * @brief Add data coverage from an ::MS3Record to a ::MS3TraceList
  *
@@ -150,15 +160,15 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
  * ::MS3TraceSeg and either add data to existing entries or create new
  * ones as needed.
  *
- * As this routine adds data to a trace list it attempts to construct
- * continuous time series, merging segments when possible.  The \a
- * tolerance pointer to a ::MS3Tolerance identifies function pointers
- * that are expected to return time tolerace, in seconds, and sample
- * rate tolerance, in Hertz, for the given ::MS3Record.  If \a
- * tolerance is NULL, or the function pointers it identifies are NULL,
- * default tolerances will be used as follows:
- * - Default time tolerance is 1/2 the sampling period
- * - Default sample rate (sr) tolerance is abs(1‐sr1/sr2) < 0.0001
+ * As this routine adds data to a trace list it constructs continuous
+ * time series, merging segments when possible.  The \a tolerance
+ * pointer to a ::MS3Tolerance identifies function pointers that are
+ * expected to return time tolerace, in seconds, and sample rate
+ * tolerance, in Hertz, for the given ::MS3Record.  If \a tolerance is
+ * NULL, or the function pointers it identifies are NULL, default
+ * tolerances will be used as follows: - Default time tolerance is 1/2
+ * the sampling period - Default sample rate (sr) tolerance is
+ * abs(1‐sr1/sr2) < 0.0001
  *
  * In recommended usage, the \a splitversion flag is \b 0 and
  * different publication versions of otherwise matching data are
@@ -173,6 +183,14 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
  * coverage is added.  For segments that are removed, any memory at
  * the ::MS3TraceSeg.prvtptr will be freed.
  *
+ * If the \a pprecptr is not NULL a @ref record-list will be
+ * maintained for each segment.  If the value of \c *pprecptr is NULL,
+ * a new ::MS3RecordPtr will be allocated, otherwise the supplied
+ * structure will be updated.  The ::MS3RecordPtr will be added to the
+ * appropriate record list and the values of ::MS3RecordPtr.msr and
+ * ::MS3RecordPtr.endtime will be set, all other fields should be set
+ * by the caller.
+ *
  * The lists are always maintained in a sorted order.  An
  * ::MS3TraceList is maintained with the ::MS3TraceID entries in
  * ascending alphanumeric order of SID. If repeated SIDs are present
@@ -182,16 +200,21 @@ mstl3_free (MS3TraceList **ppmstl, int8_t freeprvtptr)
  *
  * @param[in] mstl Destination ::MS3TraceList to add data to
  * @param[in] msr ::MS3Record containing the data to add to list
+ * @param[in] pprecptr Pointer to pointer to a ::MS3RecordPtr for @ref record-list
  * @param[in] splitversion Flag to control splitting of version/quality
  * @param[in] autoheal Flag to control automatic merging of segments
- * @param[in] flags Flags to control optional functionality.
+ * @param[in] flags Flags to control optional functionality (unused)
  * @param[in] tolerance Tolerance function pointers as ::MS3Tolerance
  *
  * @returns a pointer to the ::MS3TraceSeg updated or NULL on error.
+ *
+ * \sa mstl3_readbuffer()
+ * \sa ms3_readtracelist()
  ***************************************************************************/
 MS3TraceSeg *
-mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
-              int8_t autoheal, uint32_t flags, MS3Tolerance *tolerance)
+mstl3_addmsr_recordptr (MS3TraceList *mstl, MS3Record *msr, MS3RecordPtr **pprecptr,
+                        int8_t splitversion, int8_t autoheal, uint32_t flags,
+                        MS3Tolerance *tolerance)
 {
   MS3TraceID *id = 0;
   MS3TraceID *searchid = 0;
@@ -339,6 +362,12 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
     }
     id->first = id->last = seg;
 
+    /* Add MS3RecordPtr if requested */
+    if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 1)))
+    {
+      return NULL;
+    }
+
     /* Add new MS3TraceID to MS3TraceList */
     if (!mstl->traces || !ltid)
     {
@@ -418,6 +447,10 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
 
       if (endtime > id->latest)
         id->latest = endtime;
+
+      /* Add MS3RecordPtr if requested */
+      if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 1)))
+        return NULL;
     }
     /* Record coverage is after all other coverage */
     else if ((msr->starttime - nsdelta - nstimetol) > id->latest)
@@ -433,6 +466,10 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
 
       if (endtime > id->latest)
         id->latest = endtime;
+
+      /* Add MS3RecordPtr if requested */
+      if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 0)))
+        return NULL;
     }
     /* Record coverage is before all other coverage */
     else if ((endtime + nsdelta + nstimetol) < id->earliest)
@@ -448,6 +485,10 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
 
       if (msr->starttime < id->earliest)
         id->earliest = msr->starttime;
+
+      /* Add MS3RecordPtr if requested */
+      if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 0)))
+        return NULL;
     }
     /* Record coverage fits at beginning of first segment */
     else if (firstgap <= nstimetol && firstgap >= nnstimetol && firstratecheck)
@@ -459,14 +500,18 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
 
       if (msr->starttime < id->earliest)
         id->earliest = msr->starttime;
+
+      /* Add MS3RecordPtr if requested */
+      if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 2)))
+        return NULL;
     }
     /* Search complete segment list for matches */
     else
     {
       searchseg = id->first;
-      segbefore = 0; /* Find segment that record fits before */
-      segafter = 0; /* Find segment that record fits after */
-      followseg = 0; /* Track segment that record follows in time order */
+      segbefore = NULL; /* Find segment that record fits before */
+      segafter  = NULL; /* Find segment that record fits after */
+      followseg = NULL; /* Track segment that record follows in time order */
       while (searchseg)
       {
         if (msr->starttime > searchseg->starttime)
@@ -529,6 +574,12 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
           return NULL;
         }
 
+        /* Add MS3RecordPtr if requested */
+        if (pprecptr && !(*pprecptr = mstl3_add_recordptr (segbefore, msr, endtime, 1)))
+        {
+          return NULL;
+        }
+
         /* Merge two segments that now fit if autohealing */
         if (autoheal && segafter && segbefore != segafter)
         {
@@ -548,14 +599,19 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
           if (segafter->next)
             segafter->next->prev = segafter->prev;
 
-          /* Free data samples, private data and segment structure */
+          /* Free data samples, record list, private data and segment structure */
           if (segafter->datasamples)
             libmseed_memory.free (segafter->datasamples);
+
+          if (segafter->recordlist)
+            libmseed_memory.free (segafter->recordlist);
 
           if (segafter->prvtptr)
             libmseed_memory.free (segafter->prvtptr);
 
           libmseed_memory.free (segafter);
+
+          id->numsegments -= 1;
         }
 
         seg = segbefore;
@@ -568,6 +624,12 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
           return NULL;
         }
 
+        /* Add MS3RecordPtr if requested */
+        if (pprecptr && !(*pprecptr = mstl3_add_recordptr (segafter, msr, endtime, 2)))
+        {
+          return NULL;
+        }
+
         seg = segafter;
       }
       /* Add MS3Record coverage to new segment */
@@ -575,6 +637,12 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
       {
         /* Create new segment */
         if (!(seg = mstl3_msr2seg (msr, endtime)))
+        {
+          return NULL;
+        }
+
+        /* Add MS3RecordPtr if requested */
+        if (pprecptr && !(*pprecptr = mstl3_add_recordptr (seg, msr, endtime, 0)))
         {
           return NULL;
         }
@@ -671,17 +739,8 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
   /* Set MS3TraceID as last accessed */
   mstl->last = id;
 
-  /* Store record-level metadata at segment level if requested */
-  if (flags & MSF_STOREMETADATA)
-  {
-    if (mstl3_add_metadata(seg, msr) == NULL)
-    {
-      ms_log (1, "%s(): Error adding record metadata to segment\n", __func__);
-    }
-  }
-
   return seg;
-} /* End of mstl3_addmsr() */
+} /* End of mstl3_addmsr_recordptr() */
 
 
 /****************************************************************/ /**
@@ -694,16 +753,20 @@ mstl3_addmsr (MS3TraceList *mstl, MS3Record *msr, int8_t splitversion,
  * flag set, without it the trace list will merely be a list of
  * channels.
  *
- * If the ::MSF_STOREMETADATA flag is set in \a flags, the raw bit
- * flags and extra headers for record will be stored in a list of
- * ::MS3Metadata structures associated with the appropriate
- * ::MS3TraceSeg.
+ * If the ::MSF_RECORDLIST flag is set in \a flags, a ::MS3RecordList
+ * will be built for each ::MS3TraceSeg.  The ::MS3RecordPtr entries
+ * contain the location of the data record, bit flags, extra headers, etc.
  *
  * @param[in] ppmstl Pointer-to-point to destination MS3TraceList
  * @param[in] buffer Source buffer to read miniSEED records from
  * @param[in] bufferlength Maximum length of \a buffer
  * @param[in] splitversion Flag to control splitting of version/quality
- * @param[in] flags Flags to control parsing of miniSEED, see msr3_parse()
+ * @param[in] flags Flags to control parsing and optional functionality:
+ * @parblock
+ *  - \c ::MSF_RECORDLIST : Build a ::MS3RecordList for each ::MS3TraceSeg
+ *  - Flags supported by msr3_parse()
+ *  - Flags supported by mstl3_addmsr()
+ * @endparblock
  * @param[in] tolerance Tolerance function pointers as ::MS3Tolerance
  * @param[in] verbose Controls verbosity, 0 means no diagnostic output
  *
@@ -732,10 +795,9 @@ mstl3_readbuffer (MS3TraceList **ppmstl, char *buffer, uint64_t bufferlength,
  * flag set, without it the trace list will merely be a list of
  * channels.
  *
- * If the ::MSF_STOREMETADATA flag is set in \a flags, the raw bit
- * flags and extra headers for record will be stored in a list of
- * ::MS3Metadata structures associated with the appropriate
- * ::MS3TraceSeg.
+ * If the ::MSF_RECORDLIST flag is set in \a flags, a ::MS3RecordList
+ * will be built for each ::MS3TraceSeg.  The ::MS3RecordPtr entries
+ * contain the location of the data record, bit flags, extra headers, etc.
  *
  * If \a selections is not NULL, the ::MS3Selections will be used to
  * limit what is returned to the caller.  Any data not matching the
@@ -745,7 +807,12 @@ mstl3_readbuffer (MS3TraceList **ppmstl, char *buffer, uint64_t bufferlength,
  * @param[in] buffer Source buffer to read miniSEED records from
  * @param[in] bufferlength Maximum length of \a buffer
  * @param[in] splitversion Flag to control splitting of version/quality
- * @param[in] flags Flags to control parsing of miniSEED, see msr3_parse()
+ * @param[in] flags Flags to control parsing and optional functionality:
+ * @parblock
+ *  - \c ::MSF_RECORDLIST : Build a ::MS3RecordList for each ::MS3TraceSeg
+ *  - Flags supported by msr3_parse()
+ *  - Flags supported by mstl3_addmsr()
+ * @endparblock
  * @param[in] tolerance Tolerance function pointers as ::MS3Tolerance
  * @param[in] selections Specify limits to which data should be returned, see @ref data-selections
  * @param[in] verbose Controls verbosity, 0 means no diagnostic output
@@ -761,11 +828,15 @@ mstl3_readbuffer_selection (MS3TraceList **ppmstl, char *buffer, uint64_t buffer
                             MS3Tolerance *tolerance, MS3Selections *selections,
                             int8_t verbose)
 {
-  MS3Record *msr  = NULL;
-  uint64_t offset = 0;
-  uint32_t pflags = flags;
-  int parsevalue;
+  MS3Record *msr   = NULL;
+  MS3TraceSeg *seg = NULL;
+  MS3RecordPtr *recordptr = NULL;
+  uint32_t dataoffset;
+  uint32_t datasize;
+  uint64_t offset  = 0;
+  uint32_t pflags  = flags;
   int64_t reccount = 0;
+  int parsevalue;
 
   if (!ppmstl)
     return MS_GENERROR;
@@ -827,12 +898,31 @@ mstl3_readbuffer_selection (MS3TraceList **ppmstl, char *buffer, uint64_t buffer
       }
     }
 
-    if (mstl3_addmsr (*ppmstl, msr, splitversion, 1, flags, tolerance) == 0)
+    /* Add record to trace list */
+    seg = mstl3_addmsr_recordptr (*ppmstl, msr, (flags & MSF_RECORDLIST) ? &recordptr : NULL,
+                                  splitversion, 1, flags, tolerance);
+
+    if (seg == NULL)
     {
       if (msr)
         msr3_free (&msr);
 
       return MS_GENERROR;
+    }
+
+    /* Populate remaining fields of record pointer */
+    if (recordptr)
+    {
+      /* Determine offset to data and length of data payload */
+      if (msr3_data_bounds (msr, &dataoffset, &datasize))
+        return MS_GENERROR;
+
+      recordptr->bufferptr  = buffer + offset;
+      recordptr->fileptr    = NULL;
+      recordptr->filename   = NULL;
+      recordptr->fileoffset = 0;
+      recordptr->dataoffset = dataoffset;
+      recordptr->prvtptr    = NULL;
     }
 
     reccount += 1;
@@ -854,6 +944,7 @@ MS3TraceSeg *
 mstl3_msr2seg (MS3Record *msr, nstime_t endtime)
 {
   MS3TraceSeg *seg = 0;
+  size_t datasize = 0;
   int samplesize;
 
   if (!(seg = (MS3TraceSeg *)libmseed_memory.malloc (sizeof (MS3TraceSeg))))
@@ -874,16 +965,23 @@ mstl3_msr2seg (MS3Record *msr, nstime_t endtime)
   /* Allocate space for and copy datasamples */
   if (msr->datasamples && msr->numsamples)
   {
-    samplesize = ms_samplesize (msr->sampletype);
+    if (!(samplesize = ms_samplesize (msr->sampletype)))
+    {
+      ms_log (2, "%s(): Unknown sample size for sample type: %c\n", __func__, msr->sampletype);
+      return 0;
+    }
 
-    if (!(seg->datasamples = libmseed_memory.malloc ((size_t) (samplesize * msr->numsamples))))
+    datasize = samplesize * msr->numsamples;
+
+    if (!(seg->datasamples = libmseed_memory.malloc ((size_t) (datasize))))
     {
       ms_log (2, "%s(): Error allocating memory\n", __func__);
       return 0;
     }
+    seg->datasize = datasize;
 
     /* Copy data samples from MS3Record to MS3TraceSeg */
-    memcpy (seg->datasamples, msr->datasamples, (size_t) (samplesize * msr->numsamples));
+    memcpy (seg->datasamples, msr->datasamples, datasize);
   }
 
   return seg;
@@ -903,7 +1001,8 @@ MS3TraceSeg *
 mstl3_addmsrtoseg (MS3TraceSeg *seg, MS3Record *msr, nstime_t endtime, int8_t whence)
 {
   int samplesize = 0;
-  void *newdatasamples;
+  void *newdatasamples = NULL;
+  size_t newdatasize = 0;
 
   if (!seg || !msr)
     return 0;
@@ -924,9 +1023,22 @@ mstl3_addmsrtoseg (MS3TraceSeg *seg, MS3Record *msr, nstime_t endtime, int8_t wh
       return 0;
     }
 
-    if (!(newdatasamples = libmseed_memory.realloc (seg->datasamples, (size_t) ((seg->numsamples + msr->numsamples) * samplesize))))
+    newdatasize = (seg->numsamples + msr->numsamples) * samplesize;
+
+    if (libmseed_prealloc_block_size)
+    {
+      newdatasamples = libmseed_memory_prealloc (seg->datasamples, newdatasize, &(seg->datasize));
+    }
+    else
+    {
+      newdatasamples = libmseed_memory.realloc (seg->datasamples, newdatasize);
+      seg->datasize = newdatasize;
+    }
+
+    if (!newdatasamples)
     {
       ms_log (2, "%s(): Error allocating memory\n", __func__);
+      seg->datasize = 0;
       return 0;
     }
 
@@ -985,7 +1097,8 @@ MS3TraceSeg *
 mstl3_addsegtoseg (MS3TraceSeg *seg1, MS3TraceSeg *seg2)
 {
   int samplesize = 0;
-  void *newdatasamples;
+  void *newdatasamples = NULL;
+  size_t newdatasize = 0;
 
   if (!seg1 || !seg2)
     return 0;
@@ -1006,9 +1119,22 @@ mstl3_addsegtoseg (MS3TraceSeg *seg1, MS3TraceSeg *seg2)
       return 0;
     }
 
-    if (!(newdatasamples = libmseed_memory.realloc (seg1->datasamples, (size_t) ((seg1->numsamples + seg2->numsamples) * samplesize))))
+    newdatasize = (seg1->numsamples + seg2->numsamples) * samplesize;
+
+    if (libmseed_prealloc_block_size)
+    {
+      newdatasamples = libmseed_memory_prealloc (seg1->datasamples, newdatasize, &(seg1->datasize));
+    }
+    else
+    {
+      newdatasamples = libmseed_memory.realloc (seg1->datasamples, newdatasize);
+      seg1->datasize = newdatasize;
+    }
+
+    if (!newdatasamples)
     {
       ms_log (2, "%s(): Error allocating memory\n", __func__);
+      seg1->datasize = 0;
       return 0;
     }
 
@@ -1028,8 +1154,118 @@ mstl3_addsegtoseg (MS3TraceSeg *seg1, MS3TraceSeg *seg2)
     seg1->numsamples += seg2->numsamples;
   }
 
+  /* Add seg2 record list to end of seg1 record list */
+  if (seg2->recordlist)
+  {
+    if (seg1->recordlist == NULL)
+    {
+      seg1->recordlist = seg2->recordlist;
+      seg2->recordlist = NULL;
+    }
+    else
+    {
+      seg1->recordlist->last->next = seg2->recordlist->first;
+      seg1->recordlist->last = seg2->recordlist->last;
+      seg1->recordlist->recordcnt += seg2->recordlist->recordcnt;
+    }
+  }
+
   return seg1;
 } /* End of mstl3_addsegtoseg() */
+
+/**********************************************************************/ /**
+ * @brief Add a ::MS3RecordPtr to the ::MS3RecordList of a ::MS3TraceSeg
+ *
+ * @param[in] seg ::MS3TraceSeg to add record to
+ * @param[in] msr ::MS3Record to be added, for record length and start/end times
+ * @param[in] endtime Time of last sample in record
+ * @param[in] whence Where to add record to list
+ * @parblock
+ *  - \c 0 : New entry for new list, only when seg->recordlist == NULL
+ *  - \c 1 : Add record pointer to end of list
+ *  - \c 2 : Add record pointer to beginning of list
+ * @endparblock
+ *
+ * @returns Pointer to added ::MS3RecordPtr on success and NULL on error.
+ *
+ * \sa mstl3_unpack_recordlist()
+ * \sa mstl3_readbuffer()
+ * \sa mstl3_readbuffer_selection()
+ * \sa ms3_readtracelist()
+ * \sa ms3_readtracelist_timewin()
+ * \sa ms3_readtracelist_selection()
+ * \sa mstl3_addmsr()
+ ***************************************************************************/
+MS3RecordPtr *
+mstl3_add_recordptr (MS3TraceSeg *seg, MS3Record *msr, nstime_t endtime, int8_t whence)
+{
+  MS3RecordPtr *recordptr = NULL;
+
+  if (!seg || !msr)
+    return NULL;
+
+  if (seg->recordlist && whence != 1 && whence != 2)
+  {
+    ms_log (2, "%s(): Unsupported 'whence' value: %d\n", __func__, whence);
+    return NULL;
+  }
+
+  recordptr = (MS3RecordPtr *)libmseed_memory.malloc (sizeof (MS3RecordPtr));
+
+  if (recordptr == NULL)
+  {
+    ms_log (2, "%s(): Cannot allocate memory\n", __func__);
+    return NULL;
+  }
+
+  memset (recordptr, 0, sizeof(MS3RecordPtr));
+  recordptr->msr     = msr3_duplicate (msr, 0);
+  recordptr->endtime = endtime;
+
+  if (recordptr->msr == NULL)
+  {
+    ms_log (2, "%s(): Cannot duplicate MS3Record\n", __func__);
+    libmseed_memory.free (recordptr);
+    return NULL;
+  }
+
+  /* If no record list for the segment is present, allocate and add record pointer */
+  if (seg->recordlist == NULL)
+  {
+    seg->recordlist = (MS3RecordList *)libmseed_memory.malloc (sizeof (MS3RecordList));
+
+    if (seg->recordlist == NULL)
+    {
+      ms_log (2, "%s(): Cannot allocate memory\n", __func__);
+      libmseed_memory.free (recordptr);
+      return NULL;
+    }
+
+    seg->recordlist->recordcnt = 1;
+    seg->recordlist->first     = recordptr;
+    seg->recordlist->last      = recordptr;
+  }
+  /* Otherwise, add record pointer to existing list */
+  else
+  {
+    /* Beginning of list */
+    if (whence == 2)
+    {
+      recordptr->next = seg->recordlist->first;
+      seg->recordlist->first = recordptr;
+    }
+    /* End of list */
+    else
+    {
+      seg->recordlist->last->next = recordptr;
+      seg->recordlist->last = recordptr;
+    }
+
+    seg->recordlist->recordcnt += 1;
+  }
+
+  return recordptr;
+} /* End of mstl3_add_recordptr() */
 
 /**********************************************************************/ /**
  * @brief Convert the data samples associated with an MS3TraceSeg to another
@@ -1120,11 +1356,16 @@ mstl3_convertsamples (MS3TraceSeg *seg, char type, int8_t truncate)
         idata[idx] = (int32_t) (ddata[idx] + 0.5);
       }
 
-      /* Reallocate buffer for reduced size needed */
-      if (!(seg->datasamples = libmseed_memory.realloc (seg->datasamples, (size_t) (seg->numsamples * sizeof (int32_t)))))
+      /* Reallocate buffer for reduced size needed, only if not pre-allocating */
+      if (libmseed_prealloc_block_size == 0)
       {
-        ms_log (2, "mstl3_convertsamples: cannot re-allocate buffer for sample conversion\n");
-        return -1;
+        if (!(seg->datasamples = libmseed_memory.realloc (seg->datasamples,
+                                                          (size_t) (seg->numsamples * sizeof (int32_t)))))
+        {
+          ms_log (2, "mstl3_convertsamples: cannot re-allocate buffer for sample conversion\n");
+          return -1;
+        }
+        seg->datasize = seg->numsamples * sizeof (int32_t);
       }
     }
 
@@ -1144,11 +1385,16 @@ mstl3_convertsamples (MS3TraceSeg *seg, char type, int8_t truncate)
       for (idx = 0; idx < seg->numsamples; idx++)
         fdata[idx] = (float)ddata[idx];
 
-      /* Reallocate buffer for reduced size needed */
-      if (!(seg->datasamples = libmseed_memory.realloc (seg->datasamples, (size_t) (seg->numsamples * sizeof (float)))))
+      /* Reallocate buffer for reduced size needed, only if not pre-allocating */
+      if (libmseed_prealloc_block_size == 0)
       {
-        ms_log (2, "mstl3_convertsamples: cannot re-allocate buffer after sample conversion\n");
-        return -1;
+        if (!(seg->datasamples = libmseed_memory.realloc (seg->datasamples,
+                                                          (size_t) (seg->numsamples * sizeof (float)))))
+        {
+          ms_log (2, "mstl3_convertsamples: cannot re-allocate buffer after sample conversion\n");
+          return -1;
+        }
+        seg->datasize = seg->numsamples * sizeof (float);
       }
     }
 
@@ -1180,11 +1426,367 @@ mstl3_convertsamples (MS3TraceSeg *seg, char type, int8_t truncate)
     }
 
     seg->datasamples = ddata;
+    seg->datasize = seg->numsamples * sizeof (double);
     seg->sampletype = 'd';
   } /* Done converting to 64-bit doubles */
 
   return 0;
 } /* End of mstl3_convertsamples() */
+
+/**********************************************************************/ /**
+ * @brief Resize data sample buffers of ::MS3TraceList to what is needed
+ *
+ * This routine should only be used if pre-allocation of memory, via
+ * ::libmseed_prealloc_block_size, was enabled to allocate the buffers.
+ *
+ * @param[in] mstl ::MS3TraceList to resize buffers
+ *
+ * @returns Return 0 on success, otherwise returns a libmseed error code.
+ ***************************************************************************/
+int
+mstl3_resize_buffers (MS3TraceList *mstl)
+{
+  MS3TraceID *id = NULL;
+  MS3TraceSeg *seg = NULL;
+  uint8_t samplesize = 0;
+  size_t datasize;
+
+  if (!mstl)
+    return MS_GENERROR;
+
+  /* Loop through trace ID and segment lists */
+  id = mstl->traces;
+  while (id)
+  {
+    seg = id->first;
+    while (seg)
+    {
+      samplesize = ms_samplesize(seg->sampletype);
+
+      if (samplesize && seg->datasamples && seg->numsamples > 0)
+      {
+        datasize = (size_t) seg->numsamples * samplesize;
+
+        if (seg->datasize > datasize)
+        {
+          seg->datasamples = libmseed_memory.realloc (seg->datasamples, datasize);
+
+          if (seg->datasamples == NULL)
+          {
+            ms_log (2, "%s(%s): Cannot (re)allocate memory\n", __func__, id->sid);
+            return MS_GENERROR;
+          }
+
+          seg->datasize = datasize;
+        }
+      }
+
+      seg = seg->next;
+    }
+
+    id = id->next;
+  }
+
+  return 0;
+} /* End of mstl3_resize_buffers() */
+
+/**********************************************************************/ /**
+ * @brief Unpack data samples in a @ref record-list associated with a ::MS3TraceList
+ *
+ * Normally a record list is created calling by ms3_readtracelist() or
+ * mstl3_readbuffer() with the ::MSF_RECORDLIST flag.
+ *
+ * Unpacked data samples are written to the provided \a output buffer
+ * (up to \a outputsize bytes).  If \a output is NULL, a buffer will
+ * be allocated and associated with the ::MS3TraceSeg, just as if the
+ * data were unpacked while constructing the @ref trace-list.
+ *
+ * The sample type of the decoded data is stored at
+ * ::MS3TraceSeg.sampletype (i.e. \c seg->sampletype).
+ *
+ * A record pointer entry has multiple ways to identify the location
+ * of a record: memory buffer, open file (FILE *) or file name.  This
+ * routine uses the first populated record location in the following
+ * order:
+ *   -# Buffer pointer (::MS3RecordPtr.bufferptr)
+ *   -# Open file and offset (::MS3RecordPtr.fileptr and ::MS3RecordPtr.fileoffset)
+ *   -# File name and offset (::MS3RecordPtr.filename and ::MS3RecordPtr.fileoffset)
+ *
+ * It would be unusual to build a record list outside of the library,
+ * but should that ever occur note that the record list is assumed to
+ * be in correct time order and represent a contiguous time series.
+ *
+ * @param[in] id ::MS3TraceID for relevant ::MS3TraceSeg
+ * @param[in] seg ::MS3TraceSeg with associated @ref record-list to unpack
+ * @param[out] output Output buffer for data samples, can be NULL
+ * @param[in] outputsize Size of \a output buffer
+ * @param[in] verbose Controls logging verbosity, 0 is no diagnostic output
+ *
+ * @returns the number of samples unpacked or -1 on error.
+ *
+ * \sa mstl3_readbuffer()
+ * \sa mstl3_readbuffer_selection()
+ * \sa ms3_readtracelist()
+ * \sa ms3_readtracelist_selection()
+ ***************************************************************************/
+int64_t
+mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
+                         size_t outputsize, int8_t verbose)
+{
+  MS3RecordPtr *recordptr = NULL;
+  int64_t unpackedsamples = 0;
+  int64_t totalunpackedsamples = 0;
+
+  char *filebuffer = NULL;
+  size_t filebuffersize = 0;
+
+  size_t outputoffset = 0;
+  size_t decodedsize = 0;
+  uint8_t samplesize = 0;
+  char sampletype = 0;
+  char recsampletype = 0;
+
+  FILE *fileptr = NULL;
+  const char *input = NULL;
+
+  /* Linked list of open file pointers */
+  struct filelist_s {
+    const char *filename;
+    FILE *fileptr;
+    struct filelist_s *next;
+  };
+  struct filelist_s *filelist = NULL;
+  struct filelist_s *filelistptr = NULL;
+
+  if (!id || !seg)
+    return -1;
+
+  if (!seg->recordlist)
+    return -1;
+
+  recordptr = seg->recordlist->first;
+
+  if (ms_encoding_sizetype(recordptr->msr->encoding, &samplesize, &sampletype))
+  {
+    ms_log (2, "%s(%s): Cannot determine sample size and type for encoding: %u\n",
+            __func__, id->sid, recordptr->msr->encoding);
+    return -1;
+  }
+
+  /* Calculate buffer size needed for unpacked samples */
+  decodedsize = (size_t)seg->samplecnt * samplesize;
+
+  /* If output buffer is supplied, check needed size */
+  if (output)
+  {
+    if (decodedsize > outputsize)
+    {
+      ms_log (2, "%s(%s): Output buffer (%zu bytes) is not large enought for decoded data (%zu bytes)\n",
+              __func__, id->sid, decodedsize, outputsize);
+      return -1;
+    }
+  }
+  /* Otherwise check that buffer is not already allocated  */
+  else if (seg->datasamples)
+  {
+    ms_log (2, "%s(%s): Segment data buffer is already allocated, cannot replace\n",
+            __func__, id->sid);
+    return -1;
+  }
+  /* Otherwise allocate new buffer */
+  else
+  {
+    if ((output = libmseed_memory.malloc (decodedsize)) == NULL)
+    {
+      ms_log (2, "%s(%s): Cannot allocate memory for segment data samples\n", __func__, id->sid);
+      return MS_GENERROR;
+    }
+
+    /* Associate allocated memory with segment */
+    seg->datasamples = output;
+    seg->datasize = decodedsize;
+  }
+
+  /* Iterate through record list and unpack data samples */
+  while (recordptr)
+  {
+    /* Skip records with no samples */
+    if (recordptr->msr->samplecnt == 0)
+    {
+      recordptr = recordptr->next;
+      continue;
+    }
+
+    if (ms_encoding_sizetype(recordptr->msr->encoding, NULL, &recsampletype))
+    {
+      ms_log (2, "%s(%s): Cannot determine sample type for encoding: %u\n",
+              __func__, id->sid, recordptr->msr->encoding);
+
+      totalunpackedsamples = -1;
+      break;
+    }
+
+    if (recsampletype != sampletype)
+    {
+      ms_log (2, "%s(%s): Mixed sample types cannot be decoded together: %c versus %c\n",
+              __func__, id->sid, recsampletype, sampletype);
+
+      totalunpackedsamples = -1;
+      break;
+    }
+
+    /* Decode data from buffer */
+    if (recordptr->bufferptr)
+    {
+      input = recordptr->bufferptr + recordptr->dataoffset;
+    }
+    /* Decode data from a file at a byte offset */
+    else if (recordptr->fileptr || recordptr->filename)
+    {
+      if (recordptr->fileptr)
+      {
+        fileptr = recordptr->fileptr;
+      }
+      else
+      {
+        /* Search file list for matching entry */
+        filelistptr = filelist;
+        while (filelistptr)
+        {
+          if (filelistptr->filename == recordptr->filename)
+            break;
+
+          filelistptr = filelistptr->next;
+        }
+
+        /* Add new entry to list and open file if needed */
+        if (filelistptr == NULL)
+        {
+          if ((filelistptr = libmseed_memory.malloc (sizeof (struct filelist_s))) == NULL)
+          {
+            ms_log (2, "%s(%s): Cannot allocate memory for file list entry for %s\n",
+                    __func__, id->sid, recordptr->filename);
+
+            totalunpackedsamples = -1;
+            break;
+          }
+
+          if ((filelistptr->fileptr = fopen (recordptr->filename, "r")) == NULL)
+          {
+            ms_log (2, "%s(%s): Cannot open file (%s): %s\n",
+                    __func__, id->sid, recordptr->filename, strerror(errno));
+
+            totalunpackedsamples = -1;
+            break;
+          }
+
+          filelistptr->filename = recordptr->filename;
+          filelistptr->next = filelist;
+
+          filelist = filelistptr;
+        }
+
+        fileptr = filelistptr->fileptr;
+      }
+
+      /* Allocate memory if needed, over-allocating (x2) to minimize reallocation */
+      if (recordptr->msr->reclen > filebuffersize)
+      {
+        if ((filebuffer = libmseed_memory.realloc (filebuffer, recordptr->msr->reclen * 2)) == NULL)
+        {
+          ms_log (2, "%s(%s): Cannot allocate memory for file read buffer\n",
+                  __func__, id->sid);
+
+          totalunpackedsamples = -1;
+          break;
+        }
+
+        filebuffersize = recordptr->msr->reclen * 2;
+      }
+
+      /* Seek to record position in file */
+      if (lmp_fseek64 (fileptr, recordptr->fileoffset, SEEK_SET))
+      {
+        ms_log (2, "%s(%s): Cannot seek in file: %s (%s)\n", __func__, id->sid,
+                (recordptr->filename) ? recordptr->filename : "", strerror (errno));
+
+        totalunpackedsamples = -1;
+        break;
+      }
+
+      /* Read record into buffer */
+      if (fread (filebuffer, 1, recordptr->msr->reclen, fileptr) != recordptr->msr->reclen)
+      {
+        ms_log (2, "%s(%s): Cannot read record from file: %s (%s)\n", __func__, id->sid,
+                (recordptr->filename) ? recordptr->filename : "", strerror (errno));
+
+        totalunpackedsamples = -1;
+        break;
+
+      }
+
+      input = filebuffer + recordptr->dataoffset;
+    } /* Done reading from file */
+    else
+    {
+      ms_log (2, "%s(%s): No buffer or file pointer for record\n", __func__, id->sid);
+
+      totalunpackedsamples = -1;
+      break;
+    }
+
+    /* Decode data from buffer */
+    unpackedsamples = ms_decode_data (input, recordptr->msr->reclen - recordptr->dataoffset,
+                                      recordptr->msr->encoding, recordptr->msr->samplecnt,
+                                      (unsigned char *)output + outputoffset, decodedsize - outputoffset,
+                                      &sampletype, recordptr->msr->swapflag, id->sid, verbose);
+
+    if (unpackedsamples < 0)
+    {
+      totalunpackedsamples = -1;
+      break;
+    }
+
+    outputoffset += unpackedsamples * samplesize;
+    totalunpackedsamples += unpackedsamples;
+
+    recordptr = recordptr->next;
+  } /* Done with record list entries */
+
+  /* Free file read buffer if used */
+  if (filebuffer)
+    libmseed_memory.free (filebuffer);
+
+  /* Close and free file list if used */
+  while (filelist)
+  {
+    filelistptr = filelist->next;
+    fclose (filelist->fileptr);
+    libmseed_memory.free (filelist);
+    filelist = filelistptr;
+  }
+
+  /* If output buffer was allocated here, do some maintenance */
+  if (output == seg->datasamples)
+  {
+    /* Free allocated memory on error */
+    if (totalunpackedsamples < 0)
+    {
+      libmseed_memory.free (output);
+      seg->datasamples = NULL;
+      seg->datasize    = 0;
+    }
+    else
+    {
+      seg->numsamples = totalunpackedsamples;
+    }
+  }
+
+  if (totalunpackedsamples > 0)
+    seg->sampletype = sampletype;
+
+  return totalunpackedsamples;
+} /* End of mstl3_unpack_recordlist() */
 
 /**********************************************************************/ /**
  * @brief Pack ::MS3TraceList data into miniSEED records
@@ -1225,7 +1827,12 @@ mstl3_convertsamples (MS3TraceSeg *seg, char type, int8_t truncate)
  * @param[in] reclen Maximum record length to produce
  * @param[in] encoding Encoding for data samples, see msr3_pack()
  * @param[out] packedsamples The number of samples packed, returned to caller
- * @param[in] flags Flags to control packing, ::MSF_MAINTAINMSTL or ::MSF_FLUSHDATA
+ * @param[in] flags Bit flags to control packing:
+ * @parblock
+ *  - \c ::MSF_FLUSHDATA : Pack all data in the buffer
+ *  - \c ::MSF_MAINTAINMSTL : Do not remove packe data from the buffer
+ *  - \c ::MSF_PACKVER2 : Pack miniSEED version 2 instead of default 3
+ * @endparblock
  * @param[in] verbose Controls logging verbosity, 0 is no diagnostic output
  * @param[in] extra If not NULL, add this buffer of extra headers to all records
  *
@@ -1248,7 +1855,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
   int segpackedrecords = 0;
   int64_t segpackedsamples = 0;
   int samplesize;
-  int64_t bufsize;
+  size_t bufsize;
   size_t extralength;
 
   if (!mstl || !record_handler)
@@ -1311,7 +1918,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
         ms_log (1, "Packed %d records for %s segment\n", segpackedrecords, msr->sid);
       }
 
-      /* If MSF_MAINTAINMSTL not set, adjust segment start time, data array and sample counts */
+      /* If MSF_MAINTAINMSTL not set, adjust segment start time and reduce data array and sample counts */
       if (!(flags & MSF_MAINTAINMSTL) && segpackedsamples > 0)
       {
         /* Calculate new start time, shortcut when all samples have been packed */
@@ -1320,21 +1927,32 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
         else
           seg->starttime = ms_sampletime (seg->starttime, segpackedsamples, seg->samprate);
 
-        samplesize = ms_samplesize (seg->sampletype);
+        if (!(samplesize = ms_samplesize (seg->sampletype)))
+        {
+          ms_log (2, "%s(): Unknown sample size for sample type: %c\n", __func__, seg->sampletype);
+          return 0;
+        }
+
         bufsize = (seg->numsamples - segpackedsamples) * samplesize;
 
         if (bufsize > 0)
         {
           memmove (seg->datasamples,
                    (uint8_t *)seg->datasamples + (segpackedsamples * samplesize),
-                   (size_t)bufsize);
+                   bufsize);
 
-          seg->datasamples = libmseed_memory.realloc (seg->datasamples, (size_t)bufsize);
-
-          if (seg->datasamples == NULL)
+          /* Reallocate buffer for reduced size needed, only if not pre-allocating */
+          if (libmseed_prealloc_block_size == 0)
           {
-            ms_log (2, "%s(): Cannot (re)allocate datasamples buffer\n", __func__);
-            return -1;
+            seg->datasamples = libmseed_memory.realloc (seg->datasamples, bufsize);
+
+            if (seg->datasamples == NULL)
+            {
+              ms_log (2, "%s(): Cannot (re)allocate datasamples buffer\n", __func__);
+              return -1;
+            }
+
+            seg->datasize = bufsize;
           }
         }
         else
@@ -1342,6 +1960,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
           if (seg->datasamples)
             libmseed_memory.free (seg->datasamples);
           seg->datasamples = NULL;
+          seg->datasize = 0;
         }
 
         seg->samplecnt -= segpackedsamples;
@@ -1357,7 +1976,7 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
     id = id->next;
   }
 
-  /* The record structure never owns the actual data so it should not free it. */
+  /* The record structure never owns the actual data so it should not free it */
   msr->datasamples = NULL;
   msr3_free (&msr);
 
@@ -1676,61 +2295,3 @@ mstl3_printgaplist (MS3TraceList *mstl, ms_timeformat_t timeformat,
 
   return;
 } /* End of mstl3_printgaplist() */
-
-
-/***************************************************************************
- * Add a new MS3Metadata entry to a MS3TraceSeg
- *
- * A new MS3Metadata is allocated, populated from the supplied
- * MS3Record and added to the specified MS3TraceSeg.
- *
- * For efficiency, the new MS3Metadata entry is added to the
- * beginning of the metadata list held by the MS3TraceSeg.  This
- * means the list is in the reverse order that it was populated.
- *
- * Returns a pointer to the new MS3Metadata entry on success or NULL on error.
- ***************************************************************************/
-MS3Metadata *
-mstl3_add_metadata (MS3TraceSeg *seg, MS3Record *msr)
-{
-  MS3Metadata *metadata = NULL;
-
-  if (!seg || !msr)
-    return NULL;
-
-  metadata = (MS3Metadata *)libmseed_memory.malloc (sizeof (MS3Metadata));
-
-  if (metadata == NULL)
-  {
-    ms_log (2, "%s(): Cannot allocate memory\n", __func__);
-    return NULL;
-  }
-
-  metadata->starttime = msr->starttime;
-  metadata->endtime = msr3_endtime(msr);
-  metadata->flags = msr->flags;
-
-  if (msr->extralength > 0)
-  {
-    metadata->extra = (char *)libmseed_memory.malloc (msr->extralength + 1);
-
-    if (metadata->extra == NULL)
-    {
-      ms_log (2, "%s(): Cannot allocate memory\n", __func__);
-      free (metadata);
-      return NULL;
-    }
-
-    memcpy (metadata->extra, msr->extra, msr->extralength);
-    metadata->extra[msr->extralength] = '\0';
-  }
-  else
-  {
-    metadata->extra = NULL;
-  }
-
-  metadata->next = seg->metadata;
-  seg->metadata = metadata;
-
-  return metadata;
-} /* End of mstl3_add_metadata() */

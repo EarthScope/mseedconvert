@@ -37,6 +37,43 @@ static nstime_t ms_time2nstime_int (int year, int day, int hour,
 /* Global set of allocation functions, defaulting to system malloc(), realloc() and free() */
 LIBMSEED_MEMORY libmseed_memory = { .malloc = malloc, .realloc = realloc, .free = free };
 
+/* Global pre-allocation block size, default 1 MiB on Windows, disabled otherwise */
+#if defined(LMP_WIN)
+size_t libmseed_prealloc_block_size = 1048576;
+#else
+size_t libmseed_prealloc_block_size = 0;
+#endif
+
+/* Internal realloc() wrapper that allocates in libmseed_prealloc_block_size blocks */
+void *
+libmseed_memory_prealloc (void *ptr, size_t size, size_t *currentsize)
+{
+  size_t newsize;
+  void *newptr;
+
+  if (!currentsize)
+    return NULL;
+
+  if (libmseed_prealloc_block_size == 0)
+    return NULL;
+
+  /* No additional memory needed if request already satisfied */
+  if (size < *currentsize)
+    return ptr;
+
+  /* Calculate new size needed for request by adding blocks */
+  newsize = *currentsize + libmseed_prealloc_block_size;
+  while (newsize < size)
+    newsize += libmseed_prealloc_block_size;
+
+  newptr = libmseed_memory.realloc (ptr, newsize);
+
+  if (newptr)
+    *currentsize = newsize;
+
+  return newptr;
+}
+
 /* A constant number of seconds between the NTP and Posix/Unix time epoch */
 #define NTPPOSIXEPOCHDELTA 2208988800LL
 
@@ -73,7 +110,8 @@ static const int monthdays_leap[] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30,
 
 /* Check that a nanosecond is in a valid range */
 #define VALIDNANOSEC(nanosec) (nanosec >= 0 && nanosec <= 999999999)
-/** @endcond End of UNDOCUMENTED */
+
+/** @endcond */
 
 
 /**********************************************************************/ /**
@@ -889,7 +927,7 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
     ms_log (2, "%s(): Unhandled combination of timeformat and subseconds, please report!\n", __func__);
     ms_log (2, "%s():   nstime: %"PRId64", isec: %"PRId64", nanosec: %d, mirosec: %d, submicro: %d\n",
             __func__, nstime, isec, nanosec, microsec, submicro);
-    ms_log (2, "%s():   timeformat: %d, subseconds: %d\n", __func__, timeformat, subseconds);
+    ms_log (2, "%s():   timeformat: %d, subseconds: %d\n", __func__, (int)timeformat, (int)subseconds);
     return NULL;
   }
 
@@ -1016,7 +1054,7 @@ ms_time2nstime (int year, int yday, int hour, int min, int sec, uint32_t nsec)
 
   if (!VALIDNANOSEC (nsec))
   {
-    ms_log (2, "%s(): nanosecond (%d) is out of range\n", __func__, nsec);
+    ms_log (2, "%s(): nanosecond (%u) is out of range\n", __func__, nsec);
     return NSTERROR;
   }
 
@@ -1043,7 +1081,7 @@ ms_time2nstime (int year, int yday, int hour, int min, int sec, uint32_t nsec)
  * @returns epoch time on success and ::NSTERROR on error.
  ***************************************************************************/
 nstime_t
-ms_timestr2nstime (char *timestr)
+ms_timestr2nstime (const char *timestr)
 {
   int fields;
   int year    = 0;
@@ -1142,7 +1180,7 @@ ms_timestr2nstime (char *timestr)
  * @returns epoch time on success and ::NSTERROR on error.
  ***************************************************************************/
 nstime_t
-ms_seedtimestr2nstime (char *seedtimestr)
+ms_seedtimestr2nstime (const char *seedtimestr)
 {
   int fields;
   int year    = 0;

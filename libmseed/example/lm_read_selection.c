@@ -85,7 +85,7 @@ main (int argc, char **argv)
       starttimestr[0] = endtimestr[0] = '\0';
     }
 
-    ms_log (0, "TraceID for %s (%d), earliest: %s, latest: %s, segments: %d\n",
+    ms_log (0, "TraceID for %s (%d), earliest: %s, latest: %s, segments: %u\n",
             tid->sid, tid->pubversion, starttimestr, endtimestr, tid->numsegments);
 
     seg = tid->first;
@@ -98,8 +98,9 @@ main (int argc, char **argv)
         starttimestr[0] = endtimestr[0] = '\0';
       }
 
-      ms_log (0, "  Segment %s - %s, samples: %d, sample rate: %g, sample type: %c\n",
-              starttimestr, endtimestr, seg->numsamples, seg->samprate, seg->sampletype);
+      ms_log (0, "  Segment %s - %s, samples: %" PRId64 ", sample rate: %g, sample type: %c\n",
+              starttimestr, endtimestr, seg->numsamples, seg->samprate,
+              (seg->sampletype) ? seg->sampletype : ' ');
 
       seg = seg->next;
     }

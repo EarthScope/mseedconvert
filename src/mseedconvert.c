@@ -144,7 +144,7 @@ main (int argc, char **argv)
 
       if (reclen < 0)
       {
-        ms_log (2, "%s: Cannot repack record\n");
+        ms_log (2, "%s: Cannot repack record\n", msr->sid);
         break;
       }
 
@@ -223,7 +223,7 @@ main (int argc, char **argv)
     if (packedrecords == -1)
       ms_log (2, "Cannot pack records\n");
     else if (verbose >= 2)
-      ms_log (1, "Packed %d records\n", packedrecords);
+      ms_log (1, "Packed %" PRId64 " records\n", packedrecords);
 
     totalpackedrecords += packedrecords;
     totalpackedsamples += packedsamples;
