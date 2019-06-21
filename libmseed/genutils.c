@@ -86,7 +86,7 @@ static const int monthdays_leap[] = {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30,
 #define LEAPYEAR(year) (((year % 4 == 0) && (year % 100 != 0)) || (year % 400 == 0))
 
 /* Check that a year is in a valid range */
-#define VALIDYEAR(year) (year >= 1000 && year <= 2262)
+#define VALIDYEAR(year) (year >= 1678 && year <= 2262)
 
 /* Check that a month is in a valid range */
 #define VALIDMONTH(month) (month >= 1 && month <= 12)
@@ -789,6 +789,8 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
                    ms_timeformat_t timeformat, ms_subseconds_t subseconds)
 {
   struct tm tms = {0};
+  int64_t rawisec;
+  int rawnanosec;
   int64_t isec;
   int nanosec;
   int microsec;
@@ -800,14 +802,15 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
     return NULL;
 
   /* Reduce to Unix/POSIX epoch time and fractional nanoseconds */
-  isec    = MS_NSTIME2EPOCH (nstime);
-  nanosec = (int)(nstime - (isec * NSTMODULUS));
+  isec = rawisec = MS_NSTIME2EPOCH (nstime);
+  nanosec = rawnanosec = (int)(nstime - (isec * NSTMODULUS));
 
   /* Adjust for negative epoch times */
   if (nstime < 0 && nanosec != 0)
   {
     isec -= 1;
     nanosec = NSTMODULUS - (-nanosec);
+    rawnanosec *= -1;
   }
 
   /* Determine microsecond and sub-microsecond values */
@@ -847,7 +850,7 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
       break;
     case UNIXEPOCH:
       expected = -1;
-      printed  = snprintf (timestr, 22, "%"PRId64, isec);
+      printed  = snprintf (timestr, 22, "%"PRId64, rawisec);
       break;
     case NANOSECONDEPOCH:
       expected = -1;
@@ -879,7 +882,7 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
       break;
     case UNIXEPOCH:
       expected = -1;
-      printed  = snprintf (timestr, 22, "%"PRId64".%06d", isec, microsec);
+      printed  = snprintf (timestr, 22, "%"PRId64".%06d", rawisec, rawnanosec / 1000);
       break;
     case NANOSECONDEPOCH:
       expected = -1;
@@ -911,7 +914,7 @@ ms_nstime2timestr (nstime_t nstime, char *timestr,
       break;
     case UNIXEPOCH:
       expected = -1;
-      printed  = snprintf (timestr, 22, "%"PRId64".%09d", isec, nanosec);
+      printed  = snprintf (timestr, 22, "%"PRId64".%09d", rawisec, rawnanosec);
       break;
     case NANOSECONDEPOCH:
       expected = -1;
@@ -1059,8 +1062,167 @@ ms_time2nstime (int year, int yday, int hour, int min, int sec, uint32_t nsec)
   return ms_time2nstime_int (year, yday, hour, min, sec, nsec);
 } /* End of ms_time2nstime() */
 
+
 /**********************************************************************/ /**
  * @brief Convert a time string to a high precision epoch time.
+ *
+ * Detected time formats:
+ *   -# ISO month-day as \c "YYYY-MM-DD[THH:MM:SS.FFFFFFFFF]"
+ *   -# ISO ordinal as \c "YYYY-DDD[THH:MM:SS.FFFFFFFFF]"
+ *   -# SEED ordinal as \c "YYYY,DDD[,HH,MM,SS,FFFFFFFFF]"
+ *   -# Year as \c "YYYY"
+ *   -# Unix/POSIX epoch time value as \c "[+-]#########.#########"
+ *
+ * Following determination of the format, non-epoch value conversion
+ * is performed by the ms_mdtimestr2nstime() and
+ * ms_seedtimestr2nstime() routines.
+ *
+ * Four-digit values are treated as a year, unless a sign [+-] is
+ * specified and then they are treated as epoch values.  For
+ * consistency, a caller is recommened to always include a sign with
+ * epoch values.
+ *
+ * Note that this routine does some sanity checking of the time string
+ * contents, but does _not_ perform robust date-time validation.
+ *
+ * @param[in] timestr Time string to convert
+ *
+ * @returns epoch time on success and ::NSTERROR on error.
+ *
+ * @see ms_mdtimestr2nstime()
+ * @see ms_seedtimestr2nstime()
+ ***************************************************************************/
+nstime_t
+ms_timestr2nstime (const char *timestr)
+{
+  const char *cp;
+  const char *firstdelimiter = NULL;
+  const char *separator = NULL;
+  int delimiters = 0;
+  int numberlike = 0;
+  int error = 0;
+  int length;
+  int fields;
+  int64_t sec = 0;
+  double fsec = 0.0;
+  nstime_t nstime;
+
+  if (!timestr)
+    return NSTERROR;
+
+  /* Determine first delimiter,
+   * delimiter count before date-time separator,
+   * number-like character count,
+   * while checking for allowed characters */
+  for (cp = timestr; *cp; cp++)
+  {
+    if (*cp == '-' || *cp == '/' || *cp == ',' || *cp == ':' || *cp == '.')
+    {
+      if (!firstdelimiter)
+        firstdelimiter = cp;
+
+      /* Count delimiters before the first date-time separator */
+      if (!separator)
+        delimiters++;
+
+      /* If minus (and first character) or period, it is number-like */
+      if ((*cp == '-' && cp == timestr) || *cp == '.')
+        numberlike++;
+    }
+    /* If plus (and first character) it is number-like */
+    else if (*cp == '+' && cp == timestr)
+    {
+      numberlike++;
+    }
+    /* Date-time separator, there can only be one */
+    else if (!separator && (*cp == 'T' || *cp == ' '))
+    {
+      separator = cp;
+    }
+    /* Accumulate digits as number-like */
+    else if (*cp >= '0' && *cp <= '9')
+    {
+      numberlike++;
+    }
+    /* Done if at trailing 'Z' designator */
+    else if ((*cp == 'Z' || *cp == 'z') && *(cp+1) == '\0')
+    {
+      cp++;
+      break;
+    }
+    /* Anything else is an error */
+    else
+    {
+      cp++;
+      error = 1;
+      break;
+    }
+  }
+
+  length = cp - timestr;
+
+  /* If the time string is all number-like characters assume it is an epoch time.
+   * Unless it is 4 characters, which could be a year, unless it starts with a sign. */
+  if (!error && length == numberlike &&
+      (length != 4 || (length == 4 && (timestr[0] == '-' || timestr[0] == '+'))))
+  {
+    fields = sscanf (timestr, "%" SCNd64 "%lf", &sec, &fsec);
+
+    if (fields < 1)
+    {
+      ms_log (2, "%s(): Could not convert epoch value: '%s'\n", __func__, cp);
+      return NSTERROR;
+    }
+
+    /* Convert seconds and fractional seconds to nanoseconds, return combination */
+    nstime = MS_EPOCH2NSTIME (sec);
+
+    if (fsec != 0.0)
+    {
+      if (nstime >= 0)
+        nstime += (int)(fsec * 1000000000.0 + 0.5);
+      else
+        nstime -= (int)(fsec * 1000000000.0 + 0.5);
+    }
+
+    return nstime;
+  }
+  /* Otherwise, a non-epoch value time string */
+  else if (!error && length >= 4 && length <= 32)
+  {
+    if (firstdelimiter)
+    {
+      /* ISO month-day "YYYY-MM-DD[THH:MM:SS.FFFFFFFFF]", allow for a colloquial forward-slash flavor */
+      if ((*firstdelimiter == '-' || *firstdelimiter == '/') && delimiters == 2)
+      {
+        return ms_mdtimestr2nstime (timestr);
+      }
+      /* ISO ordinal "YYYY-DDD[THH:MM:SS.FFFFFFFFF]" */
+      else if (*firstdelimiter == '-' && delimiters == 1)
+      {
+        return ms_seedtimestr2nstime (timestr);
+      }
+      /* SEED ordinal "YYYY,DDD[,HH,MM,SS,FFFFFFFFF]" */
+      else if (*firstdelimiter == ',')
+      {
+        return ms_seedtimestr2nstime (timestr);
+      }
+    }
+    /* 4-digit year "YYYY" */
+    else if (length == 4 && !separator)
+    {
+      return ms_seedtimestr2nstime (timestr);
+    }
+  }
+
+  ms_log (2, "%s(): Unrecognized time string: '%s'\n", __func__, timestr);
+  return NSTERROR;
+} /* End of ms_timestr2nstime() */
+
+
+/**********************************************************************/ /**
+ * @brief Convert a time string (year-month-day) to a high precision
+ * epoch time.
  *
  * The time format expected is "YYYY[-MM-DD HH:MM:SS.FFFFFFFFF]", the
  * delimiter can be a dash [-], comma[,], slash [/], colon [:], or
@@ -1079,7 +1241,7 @@ ms_time2nstime (int year, int yday, int hour, int min, int sec, uint32_t nsec)
  * @returns epoch time on success and ::NSTERROR on error.
  ***************************************************************************/
 nstime_t
-ms_timestr2nstime (const char *timestr)
+ms_mdtimestr2nstime (const char *timestr)
 {
   int fields;
   int year    = 0;
@@ -1156,11 +1318,11 @@ ms_timestr2nstime (const char *timestr)
   }
 
   return ms_time2nstime_int (year, yday, hour, min, sec, nsec);
-} /* End of ms_timestr2nstime() */
+} /* End of ms_mdtimestr2nstime() */
 
 /**********************************************************************/ /**
- * @brief Convert a SEED time string (day-of-year style) to a high precision
- * epoch time.
+ * @brief Convert an SEED-style (ordinate date, i.e. day-of-year) time
+ * string to a high precision epoch time.
  *
  * The time format expected is "YYYY[,DDD,HH,MM,SS.FFFFFFFFF]", the
  * delimiter can be a dash [-], comma [,], colon [:] or period [.].
@@ -1173,7 +1335,7 @@ ms_timestr2nstime (const char *timestr)
  * be 1): "YYYY,DDD,HH" assumes MM, SS and FFFFFFFF are 0.  The year
  * is required, otherwise there wouldn't be much for a date.
  *
- * @param[in] seedtimestr Time string in SEED-style, ordinal format
+ * @param[in] seedtimestr Time string in SEED-style, ordinal date format
  *
  * @returns epoch time on success and ::NSTERROR on error.
  ***************************************************************************/
