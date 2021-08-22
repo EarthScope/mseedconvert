@@ -1,4 +1,22 @@
-2018.172: 3.0.7
+2021.234: 3.0.9
+	- Update Source Identifier handling to the adopted specification of:
+	    FDSN:NET_STA_LOC_BAND_SOURCE_POSITION
+
+2020.156: 3.0.8
+	- Add error/warning log registry for accumulation of messages.
+	- Log and diagnostic printing callbacks now require 'const char *'.
+	- Verbose-triggered messages are now sent to stdout instead of stderr.
+
+2020.137:
+	- Add capability to read data from URLs.  This feature is optional,
+	enabled at build time with LIBMSEED_URL and requires libcurl to be
+	available on the system.
+
+2019.216:
+	- Copy only UTF-8 characters in ms_strncpclean(), ms_strncpcleantail(),
+	and ms_strncpopen().
+
+2019.172: 3.0.7
 	- Add conversion of epoch values via ms_timestr2nstime().
 	- Allow trailing 'Z' in date-times in ms_timestr2nstime().
 

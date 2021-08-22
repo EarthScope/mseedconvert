@@ -3,7 +3,7 @@
  *
  * This file is part of the miniSEED Library.
  *
- * Copyright (c) 2019 Chad Trabant, IRIS Data Management Center
+ * Copyright (c) 2020 Chad Trabant, IRIS Data Management Center
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ static int reclen      = -1;
 static char *inputfile = 0;
 
 static int parameter_proc (int argcount, char **argvec);
-static void print_stderr (char *message);
+static void print_stderr (const char *message);
 static void usage (void);
 
 /* Binary I/O for Windows platforms */
@@ -68,6 +68,9 @@ main (int argc, char **argv)
 
   /* Validate CRC and unpack data samples */
   flags |= MSF_VALIDATECRC;
+
+  /* Parse byte range from file/URL path name if present */
+  flags |= MSF_PNAMERANGE;
 
   if (printdata)
     flags |= MSF_UNPACKDATA;
@@ -267,6 +270,10 @@ parameter_proc (int argcount, char **argvec)
     exit (1);
   }
 
+  /* Add program name and version to User-Agent for URL-based requests */
+  if (libmseed_url_support() && ms3_url_useragent(PACKAGE, VERSION))
+    return -1;
+
   /* Report the program version */
   if (verbose)
     ms_log (1, "%s version: %s\n", PACKAGE, VERSION);
@@ -279,7 +286,7 @@ parameter_proc (int argcount, char **argvec)
  * Print messsage to stderr.
  ***************************************************************************/
 static void
-print_stderr (char *message)
+print_stderr (const char *message)
 {
   fprintf (stderr, "%s", message);
 } /* End of print_stderr() */

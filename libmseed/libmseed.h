@@ -17,9 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * Copyright (C) 2019:
+ * Copyright (C) 2021:
  * @author Chad Trabant, IRIS Data Management Center
- * @copyright GNU Public License
  ***************************************************************************/
 
 #ifndef LIBMSEED_H
@@ -29,10 +28,10 @@
 extern "C" {
 #endif
 
-#define LIBMSEED_VERSION "3.0.7"    //!< Library version
-#define LIBMSEED_RELEASE "2019.172" //!< Library release date
+#define LIBMSEED_VERSION "3.0.9"    //!< Library version
+#define LIBMSEED_RELEASE "2021.234" //!< Library release date
 
-/** @defgroup io-functions File I/O */
+/** @defgroup io-functions File and URL I/O */
 /** @defgroup miniseed-record Record Handling */
 /** @defgroup trace-list Trace List */
 /** @defgroup data-selections Data Selections */
@@ -243,11 +242,11 @@ typedef int64_t nstime_t;
  */
 typedef enum
 {
-  ISOMONTHDAY,
-  ISOMONTHDAY_SPACE,
-  SEEDORDINAL,
-  UNIXEPOCH,
-  NANOSECONDEPOCH
+  ISOMONTHDAY       = 0,
+  ISOMONTHDAY_SPACE = 1,
+  SEEDORDINAL       = 2,
+  UNIXEPOCH         = 3,
+  NANOSECONDEPOCH   = 4
 } ms_timeformat_t;
 
 /** @enum ms_subseconds_t
@@ -264,13 +263,13 @@ typedef enum
  */
 typedef enum
 {
-  NONE,
-  MICRO,
-  NANO,
-  MICRO_NONE,
-  NANO_NONE,
-  NANO_MICRO,
-  NANO_MICRO_NONE
+  NONE            = 0,
+  MICRO           = 1,
+  NANO            = 2,
+  MICRO_NONE      = 3,
+  NANO_NONE       = 4,
+  NANO_MICRO      = 5,
+  NANO_MICRO_NONE = 6
 } ms_subseconds_t;
 
 extern int ms_nstime2time (nstime_t nstime, uint16_t *year, uint16_t *yday,
@@ -590,42 +589,113 @@ extern void mstl3_printgaplist (MS3TraceList *mstl, ms_timeformat_t timeformat,
 /** @} */
 
 /** @addtogroup io-functions
-    @brief Reading and writing interfaces for miniSEED records in files
+    @brief Reading and writing interfaces for miniSEED to/from files or URLs
+
+    The miniSEED reading interfaces read from either regular files or
+    URLs (if optional support is included).  The miniSEED writing
+    interfaces write to regular files.
+
+    URL support for reading is included by building the library with the
+    \b LIBMSEED_URL variable defined, see the
+<a class="el" href="https://github.com/iris-edu/libmseed/tree/master/INSTALL.md">INSTALL instructions</a>
+    for more information.  Only URL path-specified resources can be read,
+    e.g. HTTP GET requests.  More advanced POST or form-based requests are not supported.
+
+    The function @ref libmseed_url_support() can be used as a run-time test
+    to determine if URL support is included in the library.
+
+    Some parameters can be set that affect the reading of data from URLs, including:
+    - set the User-Agent header with @ref ms3_url_useragent()
+    - set username and password for authentication with @ref ms3_url_userpassword()
+    - set arbitrary headers with @ref ms3_url_addheader()
+    - disable SSL peer and host verficiation by setting **LIBMSEED_SSL_NOVERIFY** environment variable
+
+    Diagnostics: Setting environment variable **LIBMSEED_URL_DEBUG** enables
+    detailed verbosity of URL protocol exchanges.
+
+    \sa ms3_readmsr()
+    \sa ms3_readmsr_selection()
+    \sa ms3_readtracelist()
+    \sa ms3_readtracelist_selection()
+    \sa msr3_writemseed()
+    \sa mstl3_writemseed()
     @{ */
 
-/** @brief State container for reading miniSEED records from files.
-    __Callers should not modify these values directly and generally
-    should not need to access them.__ */
+/** @brief Type definition for data source I/O: file-system versus URL */
+typedef struct LMIO
+{
+  enum
+  {
+    LMIO_NULL = 0,   //!< IO handle type is undefined
+    LMIO_FILE = 1,   //!< IO handle is FILE-type
+    LMIO_URL  = 2    //!< IO handle is URL-type
+  } type;            //!< IO handle type
+  void *handle;      //!< Primary IO handle, either file or URL
+  void *handle2;     //!< Secondary IO handle for URL
+  int still_running; //!< Fetch status flag for URL transmissions
+} LMIO;
+
+/** @def LMIO_INITIALIZER
+    @brief Initialializer for the internal stream handle ::LMIO */
+#define LMIO_INITIALIZER                                                   \
+  {                                                                        \
+    .type = LMIO_NULL, .handle = NULL, .handle2 = NULL, .still_running = 0 \
+  }
+
+/** @brief State container for reading miniSEED records from files or URLs.
+
+    In general these values should not be directly set or accessed.  It is
+    possible to allocate a structure and set the \c path, \c startoffset,
+    and \c endoffset values for advanced usage.  Note that file/URL start
+    and end offsets can also be parsed from the path name as well.
+*/
 typedef struct MS3FileParam
 {
-  FILE *fp;            //!< File handle
-  char filename[512];  //!< File name
-  char *readbuffer;    //!< Read buffer
-  int readlength;      //!< Length of data in read buffer
-  int readoffset;      //!< Read offset in read buffer
-  int64_t filepos;     //!< File position corresponding to start of buffer
-  int64_t filesize;    //!< File size
-  int64_t recordcount; //!< Count of records read from this file
+  char path[512];      //!< INPUT: File name or URL
+  int64_t startoffset; //!< INPUT: Start position in input stream
+  int64_t endoffset;   //!< INPUT: End position in input stream, 0 == unknown (e.g. pipe)
+  int64_t streampos;   //!< OUTPUT: Read position of input stream
+  int64_t recordcount; //!< OUTPUT: Count of records read from this file so far
+
+  char *readbuffer;    //!< INTERNAL: Read buffer, allocated internally
+  int readlength;      //!< INTERNAL: Length of data in read buffer
+  int readoffset;      //!< INTERNAL: Read offset in read buffer
+  uint32_t flags;      //!< INTERNAL: Stream reading state flags
+  LMIO input;          //!< INTERNAL: IO handle, file or URL
 } MS3FileParam;
 
-extern int ms3_readmsr (MS3Record **ppmsr, const char *msfile, int64_t *fpos, int8_t *last,
+/** @def MS3FileParam_INITIALIZER
+    @brief Initialializer for the internal file or URL I/O parameters ::MS3FileParam */
+#define MS3FileParam_INITIALIZER                                  \
+  {                                                               \
+    .path = "", .startoffset = 0, .endoffset = 0, .streampos = 0, \
+    .recordcount = 0, .readbuffer = NULL, .readlength = 0,        \
+    .readoffset = 0, .flags = 0, .input = LMIO_INITIALIZER        \
+  }
+
+extern int ms3_readmsr (MS3Record **ppmsr, const char *mspath, int64_t *fpos, int8_t *last,
                         uint32_t flags, int8_t verbose);
-extern int ms3_readmsr_r (MS3FileParam **ppmsfp, MS3Record **ppmsr, const char *msfile,
+extern int ms3_readmsr_r (MS3FileParam **ppmsfp, MS3Record **ppmsr, const char *mspath,
                           int64_t *fpos, int8_t *last, uint32_t flags, int8_t verbose);
-extern int ms3_readmsr_selection (MS3FileParam **ppmsfp, MS3Record **ppmsr, const char *msfile,
+extern int ms3_readmsr_selection (MS3FileParam **ppmsfp, MS3Record **ppmsr, const char *mspath,
                                   int64_t *fpos, int8_t *last, uint32_t flags,
                                   MS3Selections *selections, int8_t verbose);
-extern int ms3_readtracelist (MS3TraceList **ppmstl, const char *msfile, MS3Tolerance *tolerance,
+extern int ms3_readtracelist (MS3TraceList **ppmstl, const char *mspath, MS3Tolerance *tolerance,
                               int8_t splitversion, uint32_t flags, int8_t verbose);
-extern int ms3_readtracelist_timewin (MS3TraceList **ppmstl, const char *msfile, MS3Tolerance *tolerance,
+extern int ms3_readtracelist_timewin (MS3TraceList **ppmstl, const char *mspath, MS3Tolerance *tolerance,
                                       nstime_t starttime, nstime_t endtime, int8_t splitversion, uint32_t flags,
                                       int8_t verbose);
-extern int ms3_readtracelist_selection (MS3TraceList **ppmstl, const char *msfile, MS3Tolerance *tolerance,
+extern int ms3_readtracelist_selection (MS3TraceList **ppmstl, const char *mspath, MS3Tolerance *tolerance,
                                         MS3Selections *selections, int8_t splitversion, uint32_t flags, int8_t verbose);
-extern int64_t msr3_writemseed (MS3Record *msr, const char *msfile, int8_t overwrite,
+extern int ms3_url_useragent (const char *program, const char *version);
+extern int ms3_url_userpassword (const char *userpassword);
+extern int ms3_url_addheader (const char *header);
+extern void ms3_url_freeheaders (void);
+extern int64_t msr3_writemseed (MS3Record *msr, const char *mspath, int8_t overwrite,
                                 uint32_t flags, int8_t verbose);
-extern int64_t mstl3_writemseed (MS3TraceList *mst, const char *msfile, int8_t overwrite,
+extern int64_t mstl3_writemseed (MS3TraceList *mst, const char *mspath, int8_t overwrite,
                                  int maxreclen, int8_t encoding, uint32_t flags, int8_t verbose);
+extern int libmseed_url_support (void);
 /** @} */
 
 /** @addtogroup string-functions
@@ -864,7 +934,8 @@ extern int mseh_print (MS3Record *msr, int indent);
     @brief Central logging functions for the library and calling programs
 
     This central logging facility is used for all logging performed by
-    the library.
+    the library.  Calling programs may also wish to log messages via
+    the same facility for consistency.
 
     The logging can be configured to send messages to arbitrary
     functions, referred to as \c log_print() and \c diag_print().
@@ -875,19 +946,79 @@ extern int mseh_print (MS3Record *msr, int indent);
     identification, referred to as \c logprefix and \c errprefix.
 
     @anchor logging-levels
+    Logging levels
+    --------------
+
     Three message levels are recognized:
     - 0 : Normal log messages, printed using \c log_print() with \c logprefix
     - 1  : Diagnostic messages, printed using \c diag_print() with \c logprefix
     - 2+ : Error messages, printed using \c diag_print() with \c errprefix
 
-    It is the task of the \c ms_log() and \c ms_log_l() functions to
+    It is the task of the ms_rlog() and ms_rlog_l() functions to
     format a message using printf conventions and pass the formatted
-    string to the appropriate printing function.
+    string to the appropriate printing function.  The convenience
+    macros ms_log() and ms_log_l() can be used to automatically set
+    the calling function name.
+
+    @anchor log-registry
+    Log Registry
+    ------------
+
+    By default log messages are sent directly to the printing
+    functions.  Optionally, error and warning messages (levels 1 and
+    2) can be accumulated in a log-registry.  The registry is enabled
+    by setting the \c maxmessages argument of either ms_rloginit() or
+    ms_rloginit_l().  Messages can be emitted, aka printed, using
+    ms_rlog_emit() and cleared using ms_rlog_free().  Alternatively,
+    the ::MSLogRegistry associated with a ::MSLogParam (or the global
+    parameters at \c gMSLogParam).
+
+    The log registry facility allows a calling program to disable
+    error (and warning) output from the library and either inspect it
+    or emitting as desired.  See \ref example-mseedview for a simple
+    example of usage.
+
+    @anchor MessageOnError
+    Message on Error
+    ----------------
+
+    Functions marked as \ref MessageOnError log a message when
+    returning an error status or logging a warning (log levels 1 and
+    2).  This indication can be useful when error and warning messages
+    are retained in \ref log-registry.
 
     @{ */
 
 /** Maximum length of log messages in bytes */
 #define MAX_LOG_MSG_LENGTH  200
+
+/** @brief Log registry entry.
+    \sa ms_rlog()
+    \sa ms_rlog_l() */
+typedef struct MSLogEntry
+{
+  int level;                        //!< Message level
+  char function[30];                //!< Function generating the mesage
+  char message[MAX_LOG_MSG_LENGTH]; //!< Log, warning or error message
+  struct MSLogEntry *next;
+} MSLogEntry;
+
+/** @brief Log message registry.
+    \sa ms_rlog()
+    \sa ms_rlog_l() */
+typedef struct MSLogRegistry
+{
+  int maxmessages;
+  int messagecnt;
+  MSLogEntry *messages;
+} MSLogRegistry;
+
+/** @def MSLogRegistry_INITIALIZER
+    @brief Initialializer for ::MSLogRegistry */
+#define MSLogRegistry_INITIALIZER                        \
+  {                                                      \
+    .maxmessages = 0, .messagecnt = 0, .messages = NULL  \
+  }
 
 /** @brief Logging parameters.
     __Callers should not modify these values directly and generally
@@ -896,25 +1027,63 @@ extern int mseh_print (MS3Record *msr, int indent);
     \sa ms_loginit() */
 typedef struct MSLogParam
 {
-  void (*log_print)(char*);  //!< Function to call for regular messages
-  const char *logprefix;     //!< Message prefix for regular and diagnostic messages
-  void (*diag_print)(char*); //!< Function to call for diagnostic and error messages
-  const char *errprefix;     //!< Message prefix for error messages
+  void (*log_print)(const char*);  //!< Function to call for regular messages
+  const char *logprefix;           //!< Message prefix for regular and diagnostic messages
+  void (*diag_print)(const char*); //!< Function to call for diagnostic and error messages
+  const char *errprefix;           //!< Message prefix for error messages
+  MSLogRegistry registry;          //!< Message registry
 } MSLogParam;
 
+/** @def MSLogParam_INITIALIZER
+    @brief Initialializer for ::MSLogParam */
+#define MSLogParam_INITIALIZER             \
+  {                                        \
+    .log_print = NULL, .logprefix = NULL,  \
+    .diag_print = NULL, .errprefix = NULL, \
+    .registry = MSLogRegistry_INITIALIZER  \
+  }
+
+/** @def ms_log
+    @brief Wrapper for ms_rlog(), call as __ms_log (level, format, ...)__
+*/
+#define ms_log(level, ...)                      \
+  ms_rlog(__func__, level, __VA_ARGS__)
+
+/** @def ms_log_l
+    @brief Wrapper for ms_rlog_l(), call as __ms_log_l (logp, level, format, ...)__
+*/
+#define ms_log_l(logp, level, ...)              \
+  ms_rlog_l(logp, __func__, level, __VA_ARGS__)
+
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__((__format__ (__printf__, 2, 3)))
+__attribute__((__format__ (__printf__, 3, 4)))
 #endif
-extern int ms_log (int level, const char *format, ...);
+extern int ms_rlog (const char *function, int level, const char *format, ...);
 #if defined(__GNUC__) || defined(__clang__)
-__attribute__ ((__format__ (__printf__, 3, 4)))
+__attribute__ ((__format__ (__printf__, 4, 5)))
 #endif
-extern int ms_log_l (MSLogParam *logp, int level, const char *format, ...);
-extern void ms_loginit (void (*log_print)(char*), const char *logprefix,
-                        void (*diag_print)(char*), const char *errprefix);
-extern MSLogParam *ms_loginit_l (MSLogParam *logp,
-                                 void (*log_print)(char*), const char *logprefix,
-                                 void (*diag_print)(char*), const char *errprefix);
+extern int ms_rlog_l (MSLogParam *logp, const char *function, int level, const char *format, ...);
+
+/** @def ms_loginit
+    @brief Convenience wrapper for ms_rloginit(), omitting max messages, disabling registry */
+#define ms_loginit(log_print, logprefix, diag_print, errprefix) \
+  ms_rloginit(log_print, logprefix, diag_print, errprefix, 0)
+
+/** @def ms_loginit_l
+    @brief Convenience wrapper for ms_rloginit_l(), omitting max messages, disabling registry */
+#define ms_loginit_l(logp, log_print, logprefix, diag_print, errprefix) \
+  ms_rloginit_l(logp, log_print, logprefix, diag_print, errprefix, 0)
+
+extern void ms_rloginit (void (*log_print)(const char*), const char *logprefix,
+                         void (*diag_print)(const char*), const char *errprefix,
+                         int maxmessages);
+extern MSLogParam *ms_rloginit_l (MSLogParam *logp,
+                                  void (*log_print)(const char*), const char *logprefix,
+                                  void (*diag_print)(const char*), const char *errprefix,
+                                  int maxmessages);
+extern int ms_rlog_emit (MSLogParam *logp, int count, int context);
+extern int ms_rlog_free (MSLogParam *logp);
+
 /** @} */
 
 /** @addtogroup leapsecond
@@ -943,12 +1112,12 @@ extern MSLogParam *ms_loginit_l (MSLogParam *logp,
     string, the non-leap second representation is used, i.e. no second
     values of "60" are generated.
 
-    @{ */
+  @{ */
 /** @brief Leap second list container */
 typedef struct LeapSecond
 {
   nstime_t leapsecond;       //!< Time of leap second as epoch since 1 January 1900
-  int32_t  TAIdelta;         //!< TAI-UTC difference in seconds
+  int32_t TAIdelta;          //!< TAI-UTC difference in seconds
   struct LeapSecond *next;   //!< Pointer to next entry, NULL if the last
 } LeapSecond;
 
@@ -959,13 +1128,13 @@ extern int ms_readleapsecondfile (const char *filename);
 /** @} */
 
 /** @addtogroup utility-functions
-    @brief General utilities
-    @{ */
+  @brief General utilities
+  @{ */
 
-extern uint8_t  ms_samplesize (const char sampletype);
+extern uint8_t ms_samplesize (const char sampletype);
 extern int ms_encoding_sizetype (const uint8_t encoding, uint8_t *samplesize, char *sampletype);
-extern const char* ms_encodingstr (const uint8_t encoding);
-extern const char* ms_errorstr (int errorcode);
+extern const char *ms_encodingstr (const uint8_t encoding);
+extern const char *ms_errorstr (int errorcode);
 
 extern nstime_t ms_sampletime (nstime_t time, int64_t offset, double samprate);
 extern double ms_dabs (double val);
@@ -975,23 +1144,25 @@ extern int ms_bigendianhost (void);
 extern int64_t lmp_ftell64 (FILE *stream);
 /** Portable version of POSIX fseeko() to set position in large files */
 extern int lmp_fseek64 (FILE *stream, int64_t offset, int whence);
+/** Portable version of POSIX nanosleep() to sleep for nanoseconds */
+extern uint64_t lmp_nanosleep (uint64_t nanoseconds);
 
 /** Return CRC32C value of supplied buffer, with optional starting CRC32C value */
-extern uint32_t ms_crc32c (const uint8_t* input, int length, uint32_t previousCRC32C);
+extern uint32_t ms_crc32c (const uint8_t *input, int length, uint32_t previousCRC32C);
 
 /** In-place byte swapping of 2 byte quantity */
-extern void ms_gswap2 ( void *data2 );
+extern void ms_gswap2 (void *data2);
 /** In-place byte swapping of 4 byte quantity */
-extern void ms_gswap4 ( void *data4 );
+extern void ms_gswap4 (void *data4);
 /** In-place byte swapping of 8 byte quantity */
-extern void ms_gswap8 ( void *data8 );
+extern void ms_gswap8 (void *data8);
 
 /** In-place byte swapping of 2 byte, memory-aligned, quantity */
-extern void ms_gswap2a ( void *data2 );
+extern void ms_gswap2a (void *data2);
 /** In-place byte swapping of 4 byte, memory-aligned, quantity */
-extern void ms_gswap4a ( void *data4 );
+extern void ms_gswap4a (void *data4);
 /** In-place byte swapping of 8 byte, memory-aligned, quantity */
-extern void ms_gswap8a ( void *data8 );
+extern void ms_gswap8a (void *data8);
 
 /** @} */
 
@@ -1026,7 +1197,7 @@ typedef struct LIBMSEED_MEMORY
 {
   void *(*malloc) (size_t);           //!< Pointer to desired malloc()
   void *(*realloc) (void *, size_t);  //!< Pointer to desired realloc()
-  void  (*free) (void *);             //!< Pointer to desired free()
+  void (*free) (void *);              //!< Pointer to desired free()
 } LIBMSEED_MEMORY;
 
 /** Global memory management function list */
@@ -1114,12 +1285,13 @@ extern void *libmseed_memory_prealloc (void *ptr, size_t size, size_t *currentsi
 #define MSF_UNPACKDATA    0x0001  //!< [Parsing] Unpack data samples
 #define MSF_SKIPNOTDATA   0x0002  //!< [Parsing] Skip input that cannot be identified as miniSEED
 #define MSF_VALIDATECRC   0x0004  //!< [Parsing] Validate CRC (if version 3)
-#define MSF_SEQUENCE      0x0008  //!< [Packing] UNSUPPORTED: Maintain a record-level sequence number
-#define MSF_FLUSHDATA     0x0010  //!< [Packing] Pack all available data even if final record would not be filled
-#define MSF_ATENDOFFILE   0x0020  //!< [Parsing] Reading routine is at the end of the file
-#define MSF_RECORDLIST    0x0040  //!< [TraceList] Build a ::MS3RecordList for each ::MS3TraceSeg
-#define MSF_MAINTAINMSTL  0x0080  //!< [TraceList] Do not modify a trace list when packing
-#define MSF_PACKVER2      0x0100  //!< [Packing] Pack as miniSEED version 2 instead of 3
+#define MSF_PNAMERANGE    0x0008  //!< [Parsing] Parse and utilize byte range from path name suffix
+#define MSF_ATENDOFFILE   0x0010  //!< [Parsing] Reading routine is at the end of the file
+#define MSF_SEQUENCE      0x0020  //!< [Packing] UNSUPPORTED: Maintain a record-level sequence number
+#define MSF_FLUSHDATA     0x0040  //!< [Packing] Pack all available data even if final record would not be filled
+#define MSF_PACKVER2      0x0080  //!< [Packing] Pack as miniSEED version 2 instead of 3
+#define MSF_RECORDLIST    0x0100  //!< [TraceList] Build a ::MS3RecordList for each ::MS3TraceSeg
+#define MSF_MAINTAINMSTL  0x0200  //!< [TraceList] Do not modify a trace list when packing
 /** @} */
 
 #ifdef __cplusplus

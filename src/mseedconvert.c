@@ -15,7 +15,7 @@
 #include <libmseed.h>
 #include <parson.h>
 
-#define VERSION "0.9"
+#define VERSION "0.9.1"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -36,7 +36,7 @@ static int convertsamples (MS3Record *msr, int packencoding);
 static int retired_encoding (int8_t encoding);
 static int parameter_proc (int argcount, char **argvec);
 static void record_handler (char *record, int reclen, void *ptr);
-static void print_stderr (char *message);
+static void print_stderr (const char *message);
 static void usage (void);
 
 int
@@ -640,7 +640,7 @@ record_handler (char *record, int reclen, void *ptr)
  * Print messsage to stderr.
  ***************************************************************************/
 static void
-print_stderr (char *message)
+print_stderr (const char *message)
 {
   fprintf (stderr, "%s", message);
 } /* End of print_stderr() */

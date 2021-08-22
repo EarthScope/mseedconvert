@@ -6,7 +6,7 @@
  *
  * This file is part of the miniSEED Library.
  *
- * Copyright (c) 2019 Chad Trabant, IRIS Data Management Center
+ * Copyright (c) 2020 Chad Trabant, IRIS Data Management Center
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,9 +58,15 @@ main (int argc, char **argv)
   /* Set flag to validate CRCs when reading */
   flags |= MSF_VALIDATECRC;
 
+  /* Parse byte range from file/URL path name if present */
+  flags |= MSF_PNAMERANGE;
+
   /* Set flag to unpack data if printing samples */
   if (printdata)
     flags |= MSF_UNPACKDATA;
+
+  /* Enable accumulation of up to 10 error and warning messages */
+  ms_rloginit (NULL, NULL, NULL, NULL, 10);
 
   /* Loop over the input file record by record */
   while ((retcode = ms3_readmsr (&msr, inputfile, NULL, NULL,
@@ -113,7 +119,7 @@ main (int argc, char **argv)
   }
 
   if (retcode != MS_ENDOFFILE)
-    ms_log (2, "Cannot read %s: %s\n", inputfile, ms_errorstr (retcode));
+    ms_rlog_emit (NULL, 0, verbose);
 
   /* Make sure everything is cleaned up */
   ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
@@ -194,6 +200,10 @@ parameter_proc (int argcount, char **argvec)
     ms_log (1, "Try %s -h for usage\n", PACKAGE);
     exit (1);
   }
+
+  /* Add program name and version to User-Agent for URL-based requests */
+  if (libmseed_url_support() && ms3_url_useragent(PACKAGE, VERSION))
+    return -1;
 
   /* Report the program version */
   if (verbose)

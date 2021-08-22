@@ -21,7 +21,7 @@ DOCDIR ?= $(DATAROOTDIR)/doc/libmseed
 MANDIR ?= $(DATAROOTDIR)/man
 MAN3DIR ?= $(MANDIR)/man3
 
-LIB_SRCS = fileutils.c genutils.c gswap.c lmplatform.c lookup.c parson.c \
+LIB_SRCS = fileutils.c genutils.c gswap.c msio.c lookup.c parson.c \
            msrutils.c extraheaders.c pack.c packdata.c tracelist.c gmtime64.c \
            crc32c.c parseutils.c unpack.c unpackdata.c selection.c logging.c
 
@@ -46,6 +46,15 @@ else
 	LIB_OPTS = -shared -Wl,--version-script=libmseed.map -Wl,-soname,$(LIB_SO_MAJOR)
 endif
 
+# Automatically configure LDFLAGS for URL support if requested and libcurl is available
+# Test for LIBMSEED_URL in CFLAGS, then if curl-config is available, implying libcurl is available
+ifneq (,$(findstring LIBMSEED_URL,$(CFLAGS)))
+  ifneq (,$(shell command -v curl-config;))
+	export LM_CURL_VERSION=$(shell curl-config --version)
+	export LDLIBS:=$(LDLIBS) $(shell curl-config --libs)
+  endif
+endif
+
 all: static
 
 static: $(LIB_A)
@@ -62,16 +71,20 @@ $(LIB_A): $(LIB_OBJS)
 $(LIB_SO): $(LIB_LOBJS)
 	@echo "Building shared library $(LIB_SO)"
 	$(RM) -f $(LIB_SO) $(LIB_SO_MAJOR) $(LIB_SO_BASE)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(LIB_OPTS) -o $(LIB_SO) $(LIB_LOBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(LDLIBS) $(LIB_OPTS) -o $(LIB_SO) $(LIB_LOBJS)
 	ln -s $(LIB_SO) $(LIB_SO_BASE)
 	ln -s $(LIB_SO) $(LIB_SO_MAJOR)
 
 test check: static FORCE
 	@$(MAKE) -C test test
 
+example: static FORCE
+	@$(MAKE) -C example
+
 clean:
 	@$(RM) $(LIB_OBJS) $(LIB_LOBJS) $(LIB_A) $(LIB_SO) $(LIB_SO_MAJOR) $(LIB_SO_BASE)
 	@$(MAKE) -C test clean
+	@$(MAKE) -C example clean
 	@echo "All clean."
 
 install: shared
@@ -98,5 +111,9 @@ install: shared
 # Standard object building for shared library using -fPIC
 .c.lo:
 	$(CC) $(CPPFLAGS) $(CFLAGS) -fPIC -c $< -o $@
+
+# Print Makefile expanded variables, e.g. % make print-LIB_SO
+print-%:
+	@echo '$*=$($*)'
 
 FORCE:
