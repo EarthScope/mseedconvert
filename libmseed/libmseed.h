@@ -28,8 +28,8 @@
 extern "C" {
 #endif
 
-#define LIBMSEED_VERSION "3.0.9"    //!< Library version
-#define LIBMSEED_RELEASE "2021.234" //!< Library release date
+#define LIBMSEED_VERSION "3.0.11"    //!< Library version
+#define LIBMSEED_RELEASE "2022.156"  //!< Library release date
 
 /** @defgroup io-functions File and URL I/O */
 /** @defgroup miniseed-record Record Handling */
@@ -229,6 +229,24 @@ typedef int64_t nstime_t;
 /** @def MS_NSTIME2EPOCH
     @brief Macro to convert high precision epoch time to Unix/POSIX epoch time */
 #define MS_NSTIME2EPOCH(X) (X) / NSTMODULUS
+
+/** @def MS_HPTIME2NSTIME
+    @brief Convert a hptime_t value (used by previous releases) to nstime_t
+
+    An HTPTIME/hptime_t value, used by libmseed major version <= 2,
+    defines microsecond ticks.  An NSTIME/nstime_t value, used by this
+    version of the library, defines nanosecond ticks.
+*/
+#define MS_HPTIME2NSTIME(X) (X) * (nstime_t) 1000
+
+/** @def MS_NSTIME2HPTIME
+    @brief Convert an nstime_t value to hptime_t (used by previous releases)
+
+    An HTPTIME/hptime_t value, used by libmseed major version <= 2,
+    defines microsecond ticks.  An NSTIME/nstime_t value, used by this
+    version of the library, defines nanosecond ticks.
+ */
+#define MS_NSTIME2HPTIME(X) (X) / 1000
 
 /** @enum ms_timeformat_t
     @brief Time format identifiers
@@ -964,19 +982,38 @@ extern int mseh_print (MS3Record *msr, int indent);
     Log Registry
     ------------
 
-    By default log messages are sent directly to the printing
-    functions.  Optionally, error and warning messages (levels 1 and
-    2) can be accumulated in a log-registry.  The registry is enabled
-    by setting the \c maxmessages argument of either ms_rloginit() or
-    ms_rloginit_l().  Messages can be emitted, aka printed, using
-    ms_rlog_emit() and cleared using ms_rlog_free().  Alternatively,
-    the ::MSLogRegistry associated with a ::MSLogParam (or the global
-    parameters at \c gMSLogParam).
-
     The log registry facility allows a calling program to disable
     error (and warning) output from the library and either inspect it
-    or emitting as desired.  See \ref example-mseedview for a simple
-    example of usage.
+    or emit (print) as desired.
+
+    By default log messages are sent directly to the printing
+    functions.  Optionally, **error and warning messages** (levels 1
+    and 2) can be accumulated in a log-registry.  Verbose output
+    messages (level 0) are not accumulated in the registry.  The
+    registry is enabled by setting the \c maxmessages argument of
+    either ms_rloginit() or ms_rloginit_l().  Messages can be emitted,
+    aka printed, using ms_rlog_emit() and cleared using
+    ms_rlog_free().  Alternatively, the ::MSLogRegistry associated
+    with a ::MSLogParam (or the global parameters at \c gMSLogParam).
+
+    See \ref example-mseedview for a simple example of error and
+    warning message registry usage.
+
+    @anchor log-threading
+    Logging in Threads
+    ------------------
+
+    By default the library is compiled in a mode where each thread of
+    a multi-threaded program will have it's own, default logging
+    parameters.  __If you wish to change the default printing
+    functions, message prefixes, or enable the log registry, this must
+    be done per-thread.__
+
+    The library can be built with the \b LIBMSEED_NO_THREADING
+    variable defined, resulting in a mode where there are global
+    parameters for all threads.  In general this should not be used
+    unless the system does not support the necessary thread-local
+    storage directives.
 
     @anchor MessageOnError
     Message on Error
@@ -1157,12 +1194,34 @@ extern void ms_gswap4 (void *data4);
 /** In-place byte swapping of 8 byte quantity */
 extern void ms_gswap8 (void *data8);
 
-/** In-place byte swapping of 2 byte, memory-aligned, quantity */
-extern void ms_gswap2a (void *data2);
-/** In-place byte swapping of 4 byte, memory-aligned, quantity */
-extern void ms_gswap4a (void *data4);
-/** In-place byte swapping of 8 byte, memory-aligned, quantity */
-extern void ms_gswap8a (void *data8);
+#if __GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 5) || defined (__clang__)
+/** Deprecated: In-place byte swapping of 2 byte, memory-aligned, quantity */
+__attribute__ ((deprecated("Use ms_gswap2 instead.")))
+extern void     ms_gswap2a ( void *data2 );
+/** Deprecated: In-place byte swapping of 4 byte, memory-aligned, quantity */
+__attribute__ ((deprecated("Use ms_gswap4 instead.")))
+extern void     ms_gswap4a ( void *data4 );
+/** Deprecated: In-place byte swapping of 8 byte, memory-aligned, quantity */
+__attribute__ ((deprecated("Use ms_gswap8 instead.")))
+extern void     ms_gswap8a ( void *data8 );
+#elif defined(_MSC_FULL_VER) && (_MSC_FULL_VER > 140050320)
+/** Deprecated: In-place byte swapping of 2 byte, memory-aligned, quantity */
+__declspec(deprecated("Use ms_gswap2 instead."))
+extern void     ms_gswap2a ( void *data2 );
+/** Deprecated: In-place byte swapping of 4 byte, memory-aligned, quantity */
+__declspec(deprecated("Use ms_gswap4 instead."))
+extern void     ms_gswap4a ( void *data4 );
+/** Deprecated: In-place byte swapping of 8 byte, memory-aligned, quantity */
+__declspec(deprecated("Use ms_gswap8 instead."))
+extern void     ms_gswap8a ( void *data8 );
+#else
+/** Deprecated: In-place byte swapping of 2 byte, memory-aligned, quantity */
+extern void     ms_gswap2a ( void *data2 );
+/** Deprecated: In-place byte swapping of 4 byte, memory-aligned, quantity */
+extern void     ms_gswap4a ( void *data4 );
+/** Deprecated: In-place byte swapping of 8 byte, memory-aligned, quantity */
+extern void     ms_gswap8a ( void *data8 );
+#endif
 
 /** @} */
 

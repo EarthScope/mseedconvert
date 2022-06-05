@@ -1,3 +1,25 @@
+2022.156: 3.0.11
+	- Generate proper HTTP Range header by always including a start value,
+	defaulting to 0, when a range end is specified.
+	- When time correction value is present always set the time correction
+	applied bit when creating V2 records. Thanks @nicoleroy-ipgp.
+	- mseedview example: always emit accumulated log messages, and print
+	basic summary correctly.
+
+2022.103: 3.0.10
+	- Fix uninitialized file position in ms3_readtracelist_selection() (#80)
+	by @anowacki.
+	- Fix array index warning in crc32c.c.
+	- Update emmbedded Parson to 1.4.0.
+	- Simplify byte swapping routines (#75) by @QuLogic.
+	- Initialize selection.pubversion to 0 in ms3_readtracelist_timewin()
+	by @Cuda-Chen.
+	- Make logging facility thread safe, with per-thread parameters.
+	- Add lm_pararead.c example to illustrate reading miniSEED in parallel
+	using re-entrant interfaces and POSIX threading.
+	- Add Add MS_HPTIME2NSTIME and MS_NSTIME2HPTIME macros to convert
+	to/from version 2.x time values.
+
 2021.234: 3.0.9
 	- Update Source Identifier handling to the adopted specification of:
 	    FDSN:NET_STA_LOC_BAND_SOURCE_POSITION

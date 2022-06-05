@@ -610,6 +610,7 @@ ms3_readtracelist_timewin (MS3TraceList **ppmstl, const char *mspath,
   selection.sidpattern[0] = '*';
   selection.sidpattern[1] = '\0';
   selection.timewindows   = &selecttime;
+  selection.pubversion    = 0;
   selection.next          = NULL;
 
   selecttime.starttime = starttime;
@@ -672,7 +673,7 @@ ms3_readtracelist_selection (MS3TraceList **ppmstl, const char *mspath,
   MS3RecordPtr *recordptr = NULL;
   uint32_t dataoffset;
   uint32_t datasize;
-  int64_t fpos;
+  int64_t fpos = 0;
   int retcode;
 
   if (!ppmstl)
