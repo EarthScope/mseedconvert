@@ -1,0 +1,4 @@
+2022.156: v0.9.2
+	- Update to libmseed 3.0.11 with fix for time correction applied bit
+	when writing V2 format.
+	- Add detection and use of libcurl in Makefiles.
