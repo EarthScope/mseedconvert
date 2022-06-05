@@ -6,19 +6,25 @@
 
 BIN = mseedconvert
 
+# Required compiler parameters
+REQCFLAGS = -I../libmseed
+
+LDFLAGS += -L../libmseed
+LDLIBS += -lmseed
+
 OBJS = $(BIN).o
 
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o ../$(BIN) $(OBJS) -L../libmseed -lmseed
+	$(CC) $(CFLAGS) -o ../$@ $(OBJS) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(OBJS) ../$(BIN)
 
 # Implicit rule for building object files
 %.o: %.c
-	$(CC) $(CFLAGS) -I../libmseed -c $<
+	$(CC) $(CFLAGS) $(REQCFLAGS) -c $<
 
 install:
 	@echo
