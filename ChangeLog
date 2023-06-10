@@ -1,3 +1,7 @@
+2023.161:
+	- Update libmseed to 3.0.14
+	- Convert -EH option from header replacement to JSON Merge Patch
+
 2022.156: v0.9.2
 	- Update to libmseed 3.0.11 with fix for time correction applied bit
 	when writing V2 format.
