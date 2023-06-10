@@ -1,9 +1,14 @@
 /***************************************************************************
  * mseedconvert.c
  *
- * Convert miniSEED.  For example, miniSEED 2 to 3 or to change encoding.
+ * Convert miniSEED formatted data.  For example, miniSEED version 2 to 3,
+ * convert data encodings, or to change record lengths.
  *
- * Written by Chad Trabant, IRIS Data Management Center
+ * While care is taken to preserve all characteristics of the original data,
+ * depending on the options used, conversions may result in loss of
+ * information.
+ *
+ * Written by Chad Trabant, EarthScope Data Services
  ***************************************************************************/
 
 #include <errno.h>
@@ -13,7 +18,7 @@
 #include <time.h>
 
 #include <libmseed.h>
-#include <parson.h>
+#include <yyjson.h>
 
 #define VERSION "0.9.2"
 #define PACKAGE "mseedconvert"
@@ -28,8 +33,7 @@ static char *outputfile = NULL;
 static FILE *outfile = NULL;
 
 static char *extraheaderfile = NULL;
-static char *extraheader = NULL;
-static uint16_t extraheaderlength = 0;
+static char *extraheaderpatch = NULL;
 
 static int extraheader_init (char *file);
 static int convertsamples (MS3Record *msr, int packencoding);
@@ -52,7 +56,6 @@ main (int argc, char **argv)
   int64_t packedrecords;
   uint64_t totalpackedsamples = 0;
   uint64_t totalpackedrecords = 0;
-  int8_t lastrecord;
   int bigendianhost = ms_bigendianhost ();
   int repackheaderV3 = 0;
 
@@ -78,12 +81,13 @@ main (int argc, char **argv)
     outfile = stdout;
   }
 
-  /* Set flag to skip non-data */
+  /* Set flags to validate CRCs, check for range in path names, and skip non-data */
+  flags |= MSF_VALIDATECRC;
+  flags |= MSF_PNAMERANGE;
   flags |= MSF_SKIPNOTDATA;
 
   /* Loop over the input file */
-  while ((retcode = ms3_readmsr (&msr, inputfile, NULL, &lastrecord,
-                                 flags, verbose)) == MS_NOERROR)
+  while ((retcode = ms3_readmsr (&msr, inputfile, flags, verbose)) == MS_NOERROR)
   {
     if (verbose >= 1)
       msr3_print (msr, verbose - 1);
@@ -115,10 +119,41 @@ main (int argc, char **argv)
           repackheaderV3 = 1;
       }
 
-      /* Text (ASCII) encoding does not need repacking */
-      else if (msr->encoding == DE_ASCII)
+      /* Text encoding does not need repacking */
+      else if (msr->encoding == DE_TEXT)
       {
         repackheaderV3 = 1;
+      }
+    }
+
+    /* Apply merge patch to extra headers */
+    if (extraheaderpatch)
+    {
+      /* Allocate empty object container if no headers present */
+      if (msr->extra == NULL)
+      {
+        if ((msr->extra = libmseed_memory.malloc (2)) == NULL)
+        {
+          ms_log (2, "Cannot allocate memory\n");
+          break;
+        }
+        msr->extralength = 2;
+        memcpy (msr->extra, "{}", 2);
+      }
+
+      /* Apply merge patch at root of container */
+      if (mseh_set_ptr_r (msr, "", extraheaderpatch, 'M', NULL))
+      {
+        ms_log (2, "Cannot apply merge patch to extra headers\n");
+        break;
+      }
+
+      /* Remove empty headers container */
+      if (!strncmp (msr->extra, "{}", msr->extralength))
+      {
+        libmseed_memory.free (msr->extra);
+        msr->extra       = NULL;
+        msr->extralength = 0;
       }
     }
 
@@ -134,15 +169,6 @@ main (int argc, char **argv)
         break;
       }
 
-      /* Replace extra headers */
-      if (extraheaderlength)
-      {
-        if (msr->extra)
-          free (msr->extra);
-        msr->extra       = extraheader;
-        msr->extralength = (uint16_t) extraheaderlength;
-      }
-
       /* Re-packed a parsed record into a version 3 header using raw encoded data */
       reclen = msr3_repack_mseed3 (msr, rawrec, MAXRECLEN, verbose);
 
@@ -153,13 +179,6 @@ main (int argc, char **argv)
       }
 
       record_handler (rawrec, reclen, NULL);
-
-      /* Disconnect replacement extra headers from record */
-      if (extraheaderlength)
-      {
-        msr->extra = 0;
-        msr->extralength = 0;
-      }
 
       packedsamples = msr->samplecnt;
       packedrecords = 1;
@@ -176,15 +195,6 @@ main (int argc, char **argv)
       {
         ms_log (2, "%s: Cannot unpack data samples\n", msr->sid);
         break;
-      }
-
-      /* Replace extra headers */
-      if (extraheaderlength)
-      {
-        if (msr->extra)
-          free (msr->extra);
-        msr->extra       = extraheader;
-        msr->extralength = (uint16_t) extraheaderlength;
       }
 
       msr->formatversion = packversion;
@@ -215,13 +225,6 @@ main (int argc, char **argv)
         msr->encoding = packencoding;
 
       packedrecords = msr3_pack (msr, &record_handler, NULL, &packedsamples, MSF_FLUSHDATA, verbose);
-
-      /* Disconnect replacement extra headers from record */
-      if (extraheaderlength)
-      {
-        msr->extra = 0;
-        msr->extralength = 0;
-      }
     }
 
     if (packedrecords == -1)
@@ -241,7 +244,7 @@ main (int argc, char **argv)
             totalpackedsamples, totalpackedrecords);
 
   /* Make sure everything is cleaned up */
-  ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
+  ms3_readmsr (&msr, NULL, 0, 0);
 
   if (rawrec)
     free (rawrec);
@@ -249,71 +252,48 @@ main (int argc, char **argv)
   if (outfile)
     fclose (outfile);
 
+  if (extraheaderpatch)
+    free (extraheaderpatch);
+
   return 0;
 } /* End of main() */
-
 
 /***************************************************************************
  * extraheader_init:
  *
- * Initialize extra header replacement by reading specified file,
- * parsing JSON it contains and forming a miminized version for replacement.
+ * Validate extra header merge patch by reading specified file and
+ * parsing the JSON, and re-serializing in preparation for merge patch.
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static int
 extraheader_init (char *file)
 {
-  JSON_Value *rootvalue = NULL;
-  size_t extrasize      = 0;
+  yyjson_doc *doc;
+  yyjson_read_flag rflg = YYJSON_READ_NOFLAG;
+  yyjson_read_err rerr;
+  yyjson_write_flag wflg = YYJSON_WRITE_NOFLAG;
+  yyjson_write_err werr;
 
-  rootvalue = json_parse_file (file);
+  doc = yyjson_read_file (file, rflg, NULL, &rerr);
 
-  if ( !rootvalue )
+  if (doc == NULL)
   {
-    ms_log (3, "Cannot parse extra header file (%s)\n", file);
+    ms_log (2, "Cannot read JSON file %s: (%u) %s at position: %ld\n",
+            file, rerr.code, rerr.msg, rerr.pos);
     return -1;
   }
 
-  extrasize = json_serialization_size (rootvalue);
+  extraheaderpatch = yyjson_write_opts (doc, wflg, NULL, NULL, &werr);
 
-  if (!extrasize)
+  yyjson_doc_free (doc);
+
+  if (extraheaderpatch == NULL)
   {
-    ms_log (2, "Cannot determine new extrea header serialization size\n");
-    json_value_free (rootvalue);
+    ms_log (2, "Cannot serialize extra header JSON: (%u) %s\n",
+            werr.code, werr.msg);
     return -1;
   }
-
-  if (extrasize > 65535)
-  {
-    ms_log (2, "New serialization size exceeds limit of 65,535 bytes: %" PRIu64 "\n",
-            (uint64_t)extrasize);
-    json_value_free (rootvalue);
-    return -1;
-  }
-
-  if (extraheader)
-    free (extraheader);
-
-  if ((extraheader = (char *)malloc ((extrasize))) == NULL)
-  {
-    ms_log (2, "Cannot allocate memory for extra header buffer\n");
-    json_value_free (rootvalue);
-    return -1;
-  }
-
-  if (json_serialize_to_buffer (rootvalue, extraheader, extrasize) != JSONSuccess)
-  {
-    ms_log (2, "Error serializing JSON for new extra headers\n");
-    free (extraheader);
-    json_value_free (rootvalue);
-    return -1;
-  }
-
-  extraheaderlength = extrasize - 1;
-
-  if (rootvalue)
-    json_value_free (rootvalue);
 
   return 0;
 } /* End of extraheader_init() */
@@ -343,8 +323,8 @@ convertsamples (MS3Record *msr, int packencoding)
   /* Determine sample type needed for pack encoding */
   switch (packencoding)
   {
-  case DE_ASCII:
-    encodingtype = 'a';
+  case DE_TEXT:
+    encodingtype = 't';
     break;
   case DE_INT16:
   case DE_INT32:
@@ -370,9 +350,9 @@ convertsamples (MS3Record *msr, int packencoding)
   /* Convert sample type if needed */
   if (msr->sampletype != encodingtype)
   {
-    if (msr->sampletype == 'a' || encodingtype == 'a')
+    if (msr->sampletype == 't' || encodingtype == 't' || msr->sampletype == 'a')
     {
-      ms_log (2, "Error, cannot convert ASCII samples to/from numeric type\n");
+      ms_log (2, "Error, cannot convert TEXT samples to/from numeric type\n");
       return -1;
     }
 
@@ -476,7 +456,6 @@ convertsamples (MS3Record *msr, int packencoding)
   return 0;
 } /* End of convertsamples() */
 
-
 /***************************************************************************
  * retired_encoding:
  *
@@ -511,7 +490,6 @@ retired_encoding (int8_t encoding)
 
   return 0;
 } /* End of retired_encoding() */
-
 
 /***************************************************************************
  * parameter_proc:
@@ -663,7 +641,7 @@ usage (void)
            " -R bytes       Specify record length in bytes for packing\n"
            " -E encoding    Specify encoding format for packing\n"
            " -F version     Specify output format version, default is 3\n"
-           " -eh JSONFile   Specify replacement extra headers in JSON format\n"
+           " -eh JSONFile   Specify file with an extra header JSON Merge Patch\n"
            "\n"
            " -o outfile     Specify the output file, required\n"
            "\n"
