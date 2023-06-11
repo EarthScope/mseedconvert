@@ -1,4 +1,4 @@
-# msi - miniSEED data format converter
+# mseedconvert - miniSEED data format converter
 
 A general purpose tool for converting between variations of miniSEED
 formatted data.  For example, this converter can convert:
@@ -98,6 +98,8 @@ to miniSEED version 3:
 
 #### Modifying Extra Headers (or v2 Blockettes) during conversion
 
+Any specified Merge Patch is applied to every converted data record.
+
 A JSON Merge Patch that specifies custom, non-FDSN headers:
 
 ```shell
@@ -117,10 +119,8 @@ if they exist and otherwise add them.  All other headers will remain
 uneffected.
 
 ```shell
-mseedconvert data.mseed2 -o data.mseed3 -eh extraheader_patch.json
+% mseedconvert data.mseed2 -o data.mseed3 -eh extraheader_patch.json
 ```
-
-Note: the merge patch is applied to every converted record.
 
 ## License
 
