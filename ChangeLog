@@ -1,3 +1,6 @@
+2023.162:
+	- Update libmseed to 3.0.15 with fixes for v2 packing.
+
 2023.161:
 	- Update libmseed to 3.0.14
 	- Convert -EH option from header replacement to JSON Merge Patch
