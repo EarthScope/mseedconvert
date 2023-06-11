@@ -4,9 +4,9 @@
  * Convert miniSEED formatted data.  For example, miniSEED version 2 to 3,
  * convert data encodings, or to change record lengths.
  *
- * While care is taken to preserve all characteristics of the original data,
- * depending on the options used, conversions may result in loss of
- * information.
+ * While care is taken to preserve all characteristics of the original data
+ * and most conversions are lossless, some combinations of data content and
+ * options may result in loss of information.
  *
  * Written by Chad Trabant, EarthScope Data Services
  ***************************************************************************/
@@ -637,7 +637,7 @@ usage (void)
            " -V             Report program version\n"
            " -h             Show this usage message\n"
            " -v             Be more verbose, multiple flags can be used\n"
-           " -f             Force full repack, do not use shortcut\n"
+           " -f             Force full repack of encoded data, do not use shortcut\n"
            " -R bytes       Specify record length in bytes for packing\n"
            " -E encoding    Specify encoding format for packing\n"
            " -F version     Specify output format version, default is 3\n"
