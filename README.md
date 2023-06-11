@@ -22,7 +22,7 @@ the build parameters.
 
 ## Usage
 
-```shell
+```console
 Usage: mseedconvert [options] -o outfile infile
 
  ## Options ##
@@ -66,7 +66,7 @@ is the maximum record length to create, default maximum is 131,172 bytes.
 Resulting record lengths will be exactly the size needed to contain the
 data of each input record up to the maximum.
 
-```shell
+```console
 % mseedconvert data.mseed2 -o data.mseed3
 ```
 
@@ -74,7 +74,7 @@ Input data can also be read from standard input and written to standard
 output, effectively functioning as a streaming converter.  Specify the
 input and/or output files as `-` to utilize this functionality.
 
-```shell
+```console
 % cat data.mseed2 | mseedconvert - -o - > data.mseed3
 ```
 
@@ -83,7 +83,7 @@ input and/or output files as `-` to utilize this functionality.
 When converting format version 3 to 2, you will want to specify a
 record length, which must be a power of 2.
 
-```shell
+```console
 % mseedconvert data.mseed3 -R 4096 -o data.mseed2
 ```
 
@@ -92,7 +92,7 @@ record length, which must be a power of 2.
 Converting a legacy encoding like SRO to Steim-1, while also converting
 to miniSEED version 3:
 
-```shell
+```console
 % mseedconvert testdata-encoding-SRO.mseed2 -E 10 -o testdata-encoding-Steim1.mseed3
 ```
 
@@ -102,7 +102,7 @@ Any specified Merge Patch is applied to every converted data record.
 
 A JSON Merge Patch that specifies custom, non-FDSN headers:
 
-```shell
+```console
 % cat extraheader_patch.json
 {
   "OperatorXYZ": {
@@ -118,7 +118,7 @@ Applying this patch using the `-eh` option will replace these headers
 if they exist and otherwise add them.  All other headers will remain
 uneffected.
 
-```shell
+```console
 % mseedconvert data.mseed2 -o data.mseed3 -eh extraheader_patch.json
 ```
 
