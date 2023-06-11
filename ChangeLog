@@ -1,5 +1,7 @@
-2023.162:
+2023.162: 0.9.3
 	- Update libmseed to 3.0.15 with fixes for v2 packing.
+	- Retain format v2 sequence numbers and data quality indicators if
+	the input and output formats is v2.
 
 2023.161:
 	- Update libmseed to 3.0.14

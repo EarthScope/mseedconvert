@@ -18,9 +18,10 @@
 #include <time.h>
 
 #include <libmseed.h>
+#include <mseedformat.h>
 #include <yyjson.h>
 
-#define VERSION "0.9.2"
+#define VERSION "0.9.3"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -34,6 +35,9 @@ static FILE *outfile = NULL;
 
 static char *extraheaderfile = NULL;
 static char *extraheaderpatch = NULL;
+
+static char insertV2seqnum[6] = {0};
+static char insertV2dataquality = 0;
 
 static int extraheader_init (char *file);
 static int convertsamples (MS3Record *msr, int packencoding);
@@ -92,6 +96,19 @@ main (int argc, char **argv)
     if (verbose >= 1)
       msr3_print (msr, verbose - 1);
 
+    /* Retain v2 sequence number of data quality indicator if input and output are v2.
+     * Setting these insertion values triggers them to be inserted post-record creation */
+    if (msr->formatversion == 2 && packversion == 2 && msr->record)
+    {
+      memcpy (insertV2seqnum, pMS2FSDH_SEQNUM (msr->record), 6);
+      insertV2dataquality = *pMS2FSDH_DATAQUALITY (msr->record);
+    }
+    else
+    {
+      insertV2seqnum[0]   = '\0';
+      insertV2dataquality = 0;
+    }
+
     /* Determine if unpacking data is not needed when converting to version 3 */
     if (forcerepack == 0 && packversion == 3 &&
         (packencoding < 0 || packencoding == msr->encoding))
@@ -107,7 +124,7 @@ main (int argc, char **argv)
           repackheaderV3 = 1;
       }
 
-      /* Integer and float encodings must be litte endian */
+      /* Integer and float encodings must be little endian */
       else if (msr->encoding == DE_INT16 || msr->encoding == DE_INT32 ||
                msr->encoding == DE_FLOAT32 || msr->encoding == DE_FLOAT64)
       {
@@ -607,6 +624,16 @@ parameter_proc (int argcount, char **argvec)
 static void
 record_handler (char *record, int reclen, void *ptr)
 {
+  /* Brute force overwrite of v2 sequence number and data quality indicator */
+  if (insertV2seqnum[0] != '\0')
+  {
+    memcpy (pMS2FSDH_SEQNUM (record), insertV2seqnum, 6);
+  }
+  if (insertV2dataquality != 0)
+  {
+    *pMS2FSDH_DATAQUALITY (record) = insertV2dataquality;
+  }
+
   if (fwrite (record, reclen, 1, outfile) != 1)
   {
     ms_log (2, "Cannot write to output file\n");
