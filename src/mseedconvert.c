@@ -21,7 +21,7 @@
 #include <mseedformat.h>
 #include <yyjson.h>
 
-#define VERSION "1.0.1"
+#define VERSION "1.0.2"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
