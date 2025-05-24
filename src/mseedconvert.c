@@ -21,7 +21,7 @@
 #include <mseedformat.h>
 #include <yyjson.h>
 
-#define VERSION "1.0.2"
+#define VERSION "1.0.3"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -624,6 +624,8 @@ parameter_proc (int argcount, char **argvec)
 static void
 record_handler (char *record, int reclen, void *ptr)
 {
+  (void)ptr;
+
   /* Brute force overwrite of v2 sequence number and data quality indicator */
   if (insertV2seqnum[0] != '\0')
   {

@@ -1,10 +1,9 @@
 # mseedconvert - miniSEED data format converter
 
 A general purpose tool for converting between variations of miniSEED
-formatted data.  For example, this converter can convert:
-* format version 2 to 3 (or vise versa)
+formatted data.  For example, this converter can:
+* convert format version 2 to 3 (or vise versa)
 * convert data encodings
-* change record lengths
 
 While care is taken to preserve all characteristics of the original data
 and most conversions are lossless, some combinations of data content and
@@ -17,7 +16,7 @@ contains release versions.
 
 In most environments a simple 'make' will build the program.
 
-The CC and CFLAGS environment variables can be used to configure
+The `CC` and `CFLAGS` environment variables can be used to configure
 the build parameters.
 
 ## Usage
@@ -51,7 +50,7 @@ the `-f` (force repack) option.
 ## Modifying Extra Headers during conversion
 
 The `-eh` option specifies a file containing a JSON Merge Patch
-[https://datatracker.ietf.org/doc/html/rfc7386](RFC 7386)
+[RFC 7386](https://datatracker.ietf.org/doc/html/rfc7386)
 that is applied during conversion of each record.
 
 A Merge Patch can be used to add, modify, or delete extra headers.
@@ -61,7 +60,7 @@ A Merge Patch can be used to add, modify, or delete extra headers.
 #### Converting version 2 to 3
 
 Converting miniSEED version 2 to 3 is lossless is virtually all but
-the most escoteric cases.  In this case the value specified with `-R`
+the most esoteric cases.  In this case the value specified with `-R`
 is the maximum record length to create, default maximum is 131,172 bytes.
 Resulting record lengths will be exactly the size needed to contain the
 data of each input record up to the maximum.
@@ -136,4 +135,4 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Copyright (C) 2023 Chad Trabant, EarthScope Data Service
+Copyright (C) 2025 Chad Trabant, EarthScope Data Service

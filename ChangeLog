@@ -1,3 +1,9 @@
+2025.143: 1.0.3
+	- Update libmseed to 3.1.5.
+
+2024.078: 1.0.2
+	- Add WITHOUTURL to build system, prefer /usr/bin/curl-config
+
 2024.024: 1.0.1
 	- Update libmseed to 3.1.1.
 
