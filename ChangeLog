@@ -1,5 +1,6 @@
 2025.226:
 	- Fix rounding of floating point values to integers for negative values.
+	- Do not close the output stream if it is stdout.
 	- Update libmseed to 3.1.6.
 
 2025.143: 1.0.3

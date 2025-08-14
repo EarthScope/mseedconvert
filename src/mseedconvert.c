@@ -266,7 +266,7 @@ main (int argc, char **argv)
   if (rawrec)
     free (rawrec);
 
-  if (outfile)
+  if (outfile != stdout)
     fclose (outfile);
 
   if (extraheaderpatch)
