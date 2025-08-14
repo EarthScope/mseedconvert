@@ -454,17 +454,14 @@ convertsamples (MS3Record *msr, int packencoding)
       {
         for (idx = 0; idx < msr->numsamples; idx++)
           ddata[idx] = (double)idata[idx];
-
-        free (idata);
       }
       else if (msr->sampletype == 'f') /* Convert floats to doubles */
       {
         for (idx = 0; idx < msr->numsamples; idx++)
           ddata[idx] = (double)fdata[idx];
-
-        free (fdata);
       }
 
+      free (msr->datasamples);
       msr->datasamples = ddata;
       msr->sampletype = 'd';
     }
