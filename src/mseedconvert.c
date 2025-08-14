@@ -388,7 +388,7 @@ convertsamples (MS3Record *msr, int packencoding)
             return -1;
           }
 
-          idata[idx] = (int32_t) (fdata[idx] + 0.5);
+          idata[idx] = (fdata[idx] >= 0) ? (int32_t)(fdata[idx] + 0.5) : (int32_t)(fdata[idx] - 0.5);
         }
       }
       else if (msr->sampletype == 'd') /* Convert doubles to integers with simple rounding */
@@ -403,7 +403,7 @@ convertsamples (MS3Record *msr, int packencoding)
             return -1;
           }
 
-          idata[idx] = (int32_t) (ddata[idx] + 0.5);
+          idata[idx] = (ddata[idx] >= 0) ? (int32_t)(ddata[idx] + 0.5) : (int32_t)(ddata[idx] - 0.5);
         }
 
         /* Reallocate buffer for reduced size needed */
