@@ -21,7 +21,7 @@
 #include <mseedformat.h>
 #include <yyjson.h>
 
-#define VERSION "1.0.3"
+#define VERSION "1.0.4"
 #define PACKAGE "mseedconvert"
 
 static int8_t verbose = 0;
@@ -50,7 +50,7 @@ static void usage (void);
 int
 main (int argc, char **argv)
 {
-  MS3Record *msr = 0;
+  MS3Record *msr = NULL;
   char *rawrec = NULL;
   int retcode;
   int reclen;
@@ -263,8 +263,7 @@ main (int argc, char **argv)
   /* Make sure everything is cleaned up */
   ms3_readmsr (&msr, NULL, 0, 0);
 
-  if (rawrec)
-    free (rawrec);
+  free (rawrec);
 
   if (outfile != stdout)
     fclose (outfile);

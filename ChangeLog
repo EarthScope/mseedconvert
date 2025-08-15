@@ -1,7 +1,8 @@
-2025.226:
+2025.226: 1.0.4
 	- Fix rounding of floating point values to integers for negative values.
 	- Do not close the output stream if it is stdout.
-	- Update libmseed to 3.1.6.
+	- Update to libmseed 3.1.6 with fixes for retaining time resolution for
+  miniSEED v2 packing.
 
 2025.143: 1.0.3
 	- Update libmseed to 3.1.5.
